@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { SiteGuide } from './components/SiteGuide';
-import { WeatherRadar } from './components/WeatherRadar';
+import { LiveTracking } from './components/LiveTracking';
 import { ShuttleBoard } from './components/ShuttleBoard';
 import { TrotteEtVol } from './components/TrotteEtVol';
 import { SafetySOS } from './components/SafetySOS';
@@ -9,19 +9,89 @@ import { AiAeroBriefing } from './components/AiAeroBriefing';
 import { MembersSpace } from './components/MembersSpace';
 import { ClubOutingsCalendar } from './components/ClubOutingsCalendar';
 import { OfflineBadge } from './components/OfflineBadge';
-import { FlyableSitesModal } from './components/FlyableSitesModal';
-import { fetchLiveBeacons } from './services/weatherService';
-import { LiveBeaconData } from './types';
-import { Radio, ExternalLink, Globe, Sparkles } from 'lucide-react';
+import { WelcomeAccessModal } from './components/WelcomeAccessModal';
+import { AdminGoogleAuthModal } from './components/AdminGoogleAuthModal';
+import { ClubMemberProfile } from './types';
+import { Radio, ExternalLink, Globe, Sparkles, CheckCircle2, Crown, Compass } from 'lucide-react';
+import { 
+  isSuperAdminEmail, 
+  SUPER_ADMIN_GOOGLE_EMAIL, 
+  createJonathanSuperAdminProfile 
+} from './utils/adminGoogleAuth';
+import { 
+  getStoredActiveUser, 
+  saveStoredActiveUser, 
+  clearStoredActiveUser, 
+  savePilotProfile 
+} from './utils/storageService';
+
+const WELCOME_DISMISSED_KEY = 'zeleph_welcome_dismissed_v1';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('sites');
-  const [beacons, setBeacons] = useState<LiveBeaconData[]>([]);
-  const [loadingBeacons, setLoadingBeacons] = useState<boolean>(true);
-  const [showFlyableModal, setShowFlyableModal] = useState<boolean>(false);
   const [selectedSiteId, setSelectedSiteId] = useState<string>('verel');
-  const [weatherFilter, setWeatherFilter] = useState<'all' | 'optimal' | 'flyable'>('all');
-  const [filterSiteGuideFlyable, setFilterSiteGuideFlyable] = useState<boolean>(false);
+  
+  // Super-admin dedicated modal state
+  const [isAdminGoogleModalOpen, setIsAdminGoogleModalOpen] = useState<boolean>(false);
+
+  // Current logged in user loaded from storage
+  const [currentUser, setCurrentUser] = useState<ClubMemberProfile | null>(() => {
+    return getStoredActiveUser();
+  });
+
+  // Welcome modal state: shown on initial arrival if not connected and not yet dismissed this session
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState<boolean>(() => {
+    try {
+      const active = getStoredActiveUser();
+      if (active) return false;
+      const dismissed = sessionStorage.getItem(WELCOME_DISMISSED_KEY);
+      return !dismissed;
+    } catch {
+      return true;
+    }
+  });
+
+  const [restrictedActionMessage, setRestrictedActionMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleSelectVisitor = () => {
+    try {
+      sessionStorage.setItem(WELCOME_DISMISSED_KEY, 'true');
+    } catch {}
+    setIsWelcomeModalOpen(false);
+    setRestrictedActionMessage(null);
+  };
+
+  const handleOpenWelcome = (reason?: string) => {
+    setRestrictedActionMessage(reason || null);
+    setIsWelcomeModalOpen(true);
+  };
+
+  const handleLogin = (profile: ClubMemberProfile) => {
+    // If Jonathan Roux, ensure isSuperAdmin is true
+    if (isSuperAdminEmail(profile.email || profile.googleEmail || '')) {
+      profile.isSuperAdmin = true;
+    }
+
+    // Persist to database
+    savePilotProfile(profile);
+    saveStoredActiveUser(profile);
+
+    setCurrentUser(profile);
+    showToast(`Connecté avec succès : ${profile.fullName}${profile.isSuperAdmin ? ' (Super-Administrateur)' : ''}`);
+  };
+
+  const handleLogout = () => {
+    clearStoredActiveUser();
+    setCurrentUser(null);
+    showToast("Vous êtes maintenant déconnecté. L'application est en mode visiteur.");
+  };
+
   const [currentTime, setCurrentTime] = useState<string>(() => {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -35,36 +105,16 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const loadWeather = async () => {
-    setLoadingBeacons(true);
-    try {
-      const data = await fetchLiveBeacons();
-      setBeacons(data);
-    } catch (err) {
-      console.warn('Weather fetch error:', err);
-    } finally {
-      setLoadingBeacons(false);
-    }
-  };
-
-  useEffect(() => {
-    loadWeather();
-    // Poll weather every 10 minutes
-    const interval = setInterval(loadWeather, 10 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleSelectSiteFromBeacon = (siteId: string) => {
-    setSelectedSiteId(siteId);
-    setFilterSiteGuideFlyable(false);
-    setActiveTab('sites');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const flyableCount = beacons.filter(b => b.status === 'optimal' || b.status === 'moderate').length;
-
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 flex flex-col font-sans selection:bg-sky-500 selection:text-slate-950 relative overflow-x-hidden">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-sky-500 text-slate-950 font-bold px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 border border-white/20 animate-fade-in">
+          <Sparkles className="w-5 h-5" />
+          <span className="text-xs sm:text-sm">{toastMessage}</span>
+        </div>
+      )}
+
       {/* Immersive Ambient Glows */}
       <div 
         className="fixed inset-0 opacity-25 pointer-events-none z-0" 
@@ -86,55 +136,52 @@ export default function App() {
       <OfflineBadge />
 
       {/* Main App Navigation Bar */}
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Navbar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onOpenWelcomeModal={() => handleOpenWelcome()}
+      />
 
       {/* Cockpit HUD Sub-Header */}
       <div className="relative z-10 border-b border-white/5 bg-slate-950/40 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-300">
-                Live Cockpit • Savoie & Bauges
+                Cockpit Club • Savoie, Lac du Bourget & Bauges
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] font-mono font-bold uppercase tracking-wider">
+                LiveTracking Opérationnel
               </span>
             </div>
 
-            {/* Clickable Flyable Sites Indicator */}
+            {/* Quick LiveTracking Trigger Banner */}
             <div className="mt-1">
-              {flyableCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setShowFlyableModal(true)}
-                  className="group inline-flex flex-wrap items-center gap-2 text-left transition cursor-pointer"
-                  title="Cliquer pour voir la liste détaillée des sites volables aujourd'hui"
-                >
-                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 group-hover:bg-emerald-500/25 group-hover:border-emerald-500/50 transition shadow-sm">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <strong className="text-emerald-300 font-bold text-xs group-hover:text-emerald-200">
-                      {flyableCount} site{flyableCount > 1 ? 's' : ''} volable{flyableCount > 1 ? 's' : ''} aujourd'hui
-                    </strong>
-                    <span className="text-[10px] text-emerald-400/90 font-mono font-bold underline underline-offset-2 ml-1 group-hover:translate-x-0.5 transition-transform">
-                      Voir les sites →
-                    </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('livetracking');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="group inline-flex flex-wrap items-center gap-2 text-left transition cursor-pointer"
+                title="Cliquer pour afficher la carte de suivi des pilotes en vol"
+              >
+                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-xl bg-sky-500/15 border border-sky-500/30 group-hover:bg-sky-500/25 group-hover:border-sky-500/50 transition shadow-sm">
+                  <Radio className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
+                  <strong className="text-sky-300 font-bold text-xs group-hover:text-sky-200">
+                    Carte LiveTracking des pilotes en vol
+                  </strong>
+                  <span className="text-[10px] text-sky-400/90 font-mono font-bold underline underline-offset-2 ml-1 group-hover:translate-x-0.5 transition-transform">
+                    Ouvrir la carte →
                   </span>
-                  <span className="text-xs text-slate-400 group-hover:text-slate-300 hidden xs:inline">
-                    • Brise de cluse surveillée
-                  </span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowFlyableModal(true)}
-                  className="group inline-flex items-center gap-2 text-left transition cursor-pointer text-slate-400 hover:text-slate-300"
-                  title="Cliquer pour vérifier le bulletin des sites"
-                >
-                  <span className="w-2 h-2 rounded-full bg-amber-400/80"></span>
-                  <span className="text-xs">Surveillance continue des balises et décollages savoyards</span>
-                  <span className="text-[10px] text-sky-400 underline underline-offset-2 font-mono">
-                    Statut sites →
-                  </span>
-                </button>
-              )}
+                </span>
+                <span className="text-xs text-slate-400 group-hover:text-slate-300 hidden xs:inline">
+                  • PureTrack & OGN synchronisés
+                </span>
+              </button>
             </div>
           </div>
 
@@ -178,24 +225,23 @@ export default function App() {
       <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-6">
         {activeTab === 'sites' && (
           <SiteGuide 
-            beacons={beacons} 
-            onSelectBeaconTab={() => {
-              setWeatherFilter('all');
-              setActiveTab('meteo');
-            }}
             selectedSiteId={selectedSiteId}
             onSelectSite={(id) => setSelectedSiteId(id)}
-            initialFilterFlyable={filterSiteGuideFlyable}
+            currentUser={currentUser}
+            onRequireMemberAuth={(reason) => handleOpenWelcome(reason)}
           />
         )}
 
-        {activeTab === 'meteo' && (
-          <WeatherRadar
-            beacons={beacons}
-            loading={loadingBeacons}
-            onRefresh={loadWeather}
-            onSelectSite={handleSelectSiteFromBeacon}
-            initialFilterStatus={weatherFilter}
+        {activeTab === 'livetracking' && (
+          <LiveTracking 
+            currentUser={currentUser}
+            onRequireLogin={() => {
+              handleOpenWelcome("Pour configurer votre balise de vol et partager votre position sur la carte, connectez-vous avec votre compte Google.");
+            }}
+            onNavigateToSites={() => {
+              setActiveTab('sites');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         )}
 
@@ -206,15 +252,29 @@ export default function App() {
               setActiveTab('sites');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+            currentUser={currentUser}
+            onRequireLogin={() => {
+              handleOpenWelcome("Pour vous inscrire ou proposer une sortie club, connectez-vous avec votre compte Google.");
+            }}
+            onRequireMemberAuth={(reason) => handleOpenWelcome(reason)}
           />
         )}
 
         {activeTab === 'navettes' && (
-          <ShuttleBoard />
+          <ShuttleBoard 
+            currentUser={currentUser}
+            onNavigateToMembers={() => {
+              handleOpenWelcome("Pour proposer un covoiturage ou réserver une place de navette, connectez-vous avec votre compte Google.");
+            }}
+            onRequireMemberAuth={(reason) => handleOpenWelcome(reason)}
+          />
         )}
 
         {activeTab === 'membres' && (
           <MembersSpace 
+            currentUser={currentUser}
+            onLogin={handleLogin}
+            onLogout={handleLogout}
             onNavigateToShuttles={() => {
               setActiveTab('navettes');
               window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -227,7 +287,13 @@ export default function App() {
         )}
 
         {activeTab === 'trotte' && (
-          <TrotteEtVol />
+          <TrotteEtVol 
+            currentUser={currentUser}
+            onNavigateToMembers={() => {
+              handleOpenWelcome("Pour proposer un topo rando-vol, connectez-vous avec votre compte Google.");
+            }}
+            onRequireMemberAuth={(reason) => handleOpenWelcome(reason)}
+          />
         )}
 
         {activeTab === 'sos' && (
@@ -239,27 +305,30 @@ export default function App() {
         )}
       </main>
 
-      {/* Interactive Flyable Sites Modal */}
-      <FlyableSitesModal
-        isOpen={showFlyableModal}
-        onClose={() => setShowFlyableModal(false)}
-        beacons={beacons}
-        onSelectSite={(siteId) => {
-          setSelectedSiteId(siteId);
-          setFilterSiteGuideFlyable(false);
-          setActiveTab('sites');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+      {/* Welcome Access Modal: Visitor vs Google Pilot Login */}
+      <WelcomeAccessModal
+        isOpen={isWelcomeModalOpen}
+        onClose={() => setIsWelcomeModalOpen(false)}
+        onSelectVisitor={handleSelectVisitor}
+        onLogin={handleLogin}
+        currentUser={currentUser}
+        restrictedActionMessage={restrictedActionMessage}
+        onOpenAdminGoogleModal={() => {
+          setIsWelcomeModalOpen(false);
+          setIsAdminGoogleModalOpen(true);
         }}
-        onOpenWeatherRadar={(filter = 'flyable') => {
-          setWeatherFilter(filter);
-          setActiveTab('meteo');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+      />
+
+      {/* Dedicated Super-Admin Google Modal for roux.jonath@gmail.com */}
+      <AdminGoogleAuthModal
+        isOpen={isAdminGoogleModalOpen}
+        onClose={() => setIsAdminGoogleModalOpen(false)}
+        currentUser={currentUser}
+        onLoginAsSuperAdmin={(profile) => {
+          handleLogin(profile);
+          setIsAdminGoogleModalOpen(false);
         }}
-        onOpenSiteGuideFlyable={() => {
-          setFilterSiteGuideFlyable(true);
-          setActiveTab('sites');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        onLogoutSuperAdmin={handleLogout}
       />
 
       {/* Footer */}
@@ -284,33 +353,25 @@ export default function App() {
             </div>
           </div>
 
-          {/* Quick links & Frequencies */}
-          <div className="flex flex-wrap items-center gap-4 text-slate-400">
-            <a
-              href="https://www.zeleph.com/"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-sky-400 flex items-center gap-1 transition"
+          <div className="flex items-center gap-4 text-[11px] text-slate-400">
+            <button
+              onClick={() => setIsAdminGoogleModalOpen(true)}
+              className="flex items-center gap-1 text-amber-400/80 hover:text-amber-300 transition"
+              title="Accès Super-Administrateur Google"
             >
-              <Globe className="w-3.5 h-3.5" />
+              <Crown className="w-3.5 h-3.5 text-amber-400" />
+              <span>Administration ({SUPER_ADMIN_GOOGLE_EMAIL})</span>
+            </button>
+            <span>•</span>
+            <a 
+              href="https://www.zeleph.com" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="hover:text-white transition flex items-center gap-1"
+            >
               <span>Site officiel zeleph.com</span>
-              <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+              <ExternalLink className="w-3 h-3" />
             </a>
-
-            <span className="text-slate-800 hidden sm:inline">•</span>
-
-            <div className="flex items-center gap-2 text-slate-300">
-              <Radio className="w-3.5 h-3.5 text-sky-400" />
-              <span>Club : <strong className="font-mono text-sky-400">146.500 MHz</strong></span>
-              <span className="text-slate-600">•</span>
-              <span>FFVL Sécu : <strong className="font-mono text-emerald-400">143.9875 MHz</strong></span>
-            </div>
-
-            <span className="text-slate-800 hidden sm:inline">•</span>
-
-            <span className="text-emerald-400 font-mono text-[11px] font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-              PWA Installable
-            </span>
           </div>
         </div>
       </footer>

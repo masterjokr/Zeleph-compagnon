@@ -60,17 +60,23 @@ export const WeatherRadar: React.FC<WeatherRadarProps> = ({
       {/* Top Header & Summary */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/40 backdrop-blur-md border border-white/5 rounded-3xl p-6 sm:p-7 shadow-2xl relative overflow-hidden">
         <div className="relative z-10">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-sky-400">
-              Télémétrie Balises FFVL & OpenData
+              Télémétrie Balises & Modèles Météo
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/35 text-[10px] font-mono font-bold tracking-wider uppercase">
+              Exemple - En cours de création
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-light tracking-tight text-white">
-            Balises Météo <span className="font-bold text-sky-400">Temps Réel</span>
+          <h1 className="text-2xl sm:text-3xl font-light tracking-tight text-white flex items-center gap-3 flex-wrap">
+            <span>Balises Météo <span className="font-bold text-sky-400">Temps Réel</span></span>
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-xl bg-amber-500/15 text-amber-300 border border-amber-500/30">
+              Prototype indicatif
+            </span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-            Vitesse du vent, rafales et orientation en direct sur les crêtes des Bauges, de l'Épine et de Belledonne.
+            Vitesse du vent, rafales et orientation estimés sur les sites savoyards. Ce module est actuellement un exemple indicatif en cours de développement.
           </p>
         </div>
 
@@ -89,17 +95,25 @@ export const WeatherRadar: React.FC<WeatherRadarProps> = ({
         <div className="absolute right-0 top-0 w-64 h-64 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
       </div>
 
-      {/* Strategic AI & Algorithmic Notice Banner */}
-      <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 flex items-center justify-between gap-3 text-xs text-amber-200 backdrop-blur-md">
-        <div className="flex items-center gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-          <p className="leading-snug">
-            <strong className="text-amber-300">Analyse automatisée & IA :</strong> Les diagnostics de volabilité (« Sécu OK », « Vigilance ») sont des estimations algorithmiques indicatives. <strong>Rien ne remplace votre propre analyse</strong> et votre observation directe sur le terrain.
-          </p>
+      {/* Explication Balises & Prototype en cours de création */}
+      <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-4 sm:p-5 text-xs text-amber-200 backdrop-blur-md space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 font-bold text-amber-300 uppercase tracking-wider text-[11px]">
+            <span className="px-2 py-0.5 rounded bg-amber-500/25 border border-amber-500/40 font-mono text-[10px]">
+              Exemple - En cours de création
+            </span>
+            <span>Précision sur la disponibilité des balises locales</span>
+          </div>
+          <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-mono whitespace-nowrap">
+            Pilote commandant de bord
+          </span>
         </div>
-        <span className="hidden sm:inline-block px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-mono whitespace-nowrap">
-          Pilote commandant de bord
-        </span>
+        <p className="leading-relaxed text-slate-300">
+          <strong>Pourquoi ces données sont un exemple indicatif :</strong> Tous les décollages ne disposent pas d'une balise physique installée sur place. Par exemple, à <strong>Vérel-Pragondran, il n'y a pas de balise anémomètre sur le décollage</strong> (les pilotes se réfèrent aux balises environnantes : Revard, Granier, Chamoux, ou observations visuelles de la manche à air).
+        </p>
+        <p className="leading-relaxed text-slate-400 text-[11px]">
+          Actuellement, les valeurs affichées ci-dessous proviennent d'une simulation haute résolution basée sur le modèle Open-Meteo pour les coordonnées GPS de chaque site. Le raccordement aux balises physiques de référence du secteur (FFVL, Holfuy, Spotair) est en cours de modélisation.
+        </p>
       </div>
 
       {/* Flyability Quick Status Overview */}
@@ -197,15 +211,25 @@ export const WeatherRadar: React.FC<WeatherRadarProps> = ({
               <div>
                 <div className="flex items-start justify-between gap-2 mb-4">
                   <div>
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-sky-400 block mb-0.5">
-                      {site ? site.massif : 'Savoie'}
-                    </span>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-sky-400">
+                        {site ? site.massif : 'Savoie'}
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25 text-[9px] font-mono font-semibold">
+                        Exemple en cours
+                      </span>
+                    </div>
                     <h3 className="font-bold text-white text-lg tracking-tight group-hover:text-sky-300 transition">
                       {beacon.siteName}
                     </h3>
                     <p className="text-xs text-slate-400 font-mono">
                       {site ? `Déco ${site.takeoffAlt}m • D- ${site.elevationDiff}m` : ''}
                     </p>
+                    {beacon.siteId === 'verel' && (
+                      <p className="text-[11px] text-amber-400/90 font-medium mt-1 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        ℹ️ Pas d'anémomètre sur ce déco (modèle météo estimé)
+                      </p>
+                    )}
                     {site && (
                       <div className="flex items-center gap-1.5 text-[11px] text-amber-300 font-mono mt-1">
                         <Clock className="w-3 h-3 text-amber-400 shrink-0" />
@@ -325,7 +349,9 @@ export const WeatherRadar: React.FC<WeatherRadarProps> = ({
 
               {/* Card Footer */}
               <div className="mt-5 pt-3 border-t border-white/5 flex items-center justify-between text-xs">
-                <span className="text-[10px] font-mono text-slate-500">MaJ : {beacon.lastUpdated}</span>
+                <span className="text-[10px] font-mono text-slate-500">
+                  Modèle estimé • {beacon.lastUpdated}
+                </span>
                 <button
                   onClick={() => onSelectSite(beacon.siteId)}
                   className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-sky-500/20 text-sky-400 font-bold transition flex items-center gap-1 text-[11px]"

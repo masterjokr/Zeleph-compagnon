@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { ShuttleRide, ClubMemberProfile } from '../types';
 import { ZELEPH_SITES } from '../data/sitesData';
-import { INITIAL_CURRENT_USER } from '../data/membersData';
-import { Car, Plus, Users, Clock, MapPin, Check, MessageSquare, PhoneCall, Trash2, UserCheck, Sparkles } from 'lucide-react';
+import { Car, Plus, Users, Clock, MapPin, Check, MessageSquare, PhoneCall, Trash2, UserCheck, Sparkles, User, Lock } from 'lucide-react';
+import { isZelephMember } from '../utils/authUtils';
 
 const STORAGE_KEY = 'zeleph_shuttle_rides_v1';
 const STORAGE_PROFILE_KEY = 'zeleph_member_profile_v1';
+
+export interface ShuttleBoardProps {
+  currentUser?: ClubMemberProfile | null;
+  onNavigateToMembers?: () => void;
+  onRequireMemberAuth?: (reason: string) => void;
+}
 
 const INITIAL_RIDES: ShuttleRide[] = [
   {
@@ -54,16 +60,23 @@ const INITIAL_RIDES: ShuttleRide[] = [
   }
 ];
 
-export const ShuttleBoard: React.FC = () => {
-  const [currentUser] = useState<ClubMemberProfile>(() => {
+export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({ 
+  currentUser: propCurrentUser, 
+  onNavigateToMembers,
+  onRequireMemberAuth 
+}) => {
+  // If prop provided, use it; otherwise fallback to checking localStorage safely (null if absent)
+  const [localUser] = useState<ClubMemberProfile | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PROFILE_KEY);
       if (saved) return JSON.parse(saved);
     } catch {
       // ignore
     }
-    return INITIAL_CURRENT_USER;
+    return null;
   });
+
+  const currentUser = propCurrentUser !== undefined ? propCurrentUser : localUser;
 
   const [rides, setRides] = useState<ShuttleRide[]>(() => {
     try {
@@ -79,21 +92,31 @@ export const ShuttleBoard: React.FC = () => {
   const [selectedSiteFilter, setSelectedSiteFilter] = useState<string>('all');
 
   // Form state prefilled with member profile info
-  const [driverName, setDriverName] = useState(currentUser.fullName || '');
-  const [driverPhone, setDriverPhone] = useState(currentUser.phone || '');
-  const [departurePlace, setDeparturePlace] = useState(currentUser.sector ? `Lieu de RDV (${currentUser.sector})` : 'Piscine Buisson-Rond (Chambéry)');
+  const [driverName, setDriverName] = useState(currentUser?.fullName || '');
+  const [driverPhone, setDriverPhone] = useState(currentUser?.phone || '');
+  const [departurePlace, setDeparturePlace] = useState(currentUser?.sector ? `Lieu de RDV (${currentUser.sector})` : 'Piscine Buisson-Rond (Chambéry)');
   const [destinationSiteId, setDestinationSiteId] = useState('verel');
+  const [customSiteName, setCustomSiteName] = useState('');
   const [departureTime, setDepartureTime] = useState('14:30');
-  const [totalSeats, setTotalSeats] = useState(currentUser.availableSeats || 3);
+  const [totalSeats, setTotalSeats] = useState(currentUser?.availableSeats || 3);
   const [comment, setComment] = useState('');
   const [rideToDelete, setRideToDelete] = useState<ShuttleRide | null>(null);
 
-  // When modal opens, sync with current user profile
+  // When modal opens, check member permissions and sync with current user profile
   const handleOpenModal = () => {
-    setDriverName(currentUser.fullName);
-    setDriverPhone(currentUser.phone);
-    setTotalSeats(currentUser.availableSeats || 3);
-    if (currentUser.sector) {
+    if (!isZelephMember(currentUser)) {
+      if (onRequireMemberAuth) {
+        onRequireMemberAuth("Pour proposer un covoiturage ou une navette, vous devez être connecté avec votre compte Discord (statut minimum : Membre Z'éléph).");
+      } else if (onNavigateToMembers) {
+        onNavigateToMembers();
+      }
+      return;
+    }
+    setDriverName(currentUser?.fullName || '');
+    setDriverPhone(currentUser?.phone || '');
+    setTotalSeats(currentUser?.availableSeats || 3);
+    setCustomSiteName('');
+    if (currentUser?.sector) {
       setDeparturePlace(`Secteur ${currentUser.sector}`);
     }
     setShowModal(true);
@@ -111,18 +134,25 @@ export const ShuttleBoard: React.FC = () => {
     e.preventDefault();
     if (!driverName.trim()) return;
 
-    const site = ZELEPH_SITES.find(s => s.id === destinationSiteId);
+    const isCustom = destinationSiteId === 'custom';
+    if (isCustom && !customSiteName.trim()) return;
+
+    const site = isCustom ? null : ZELEPH_SITES.find(s => s.id === destinationSiteId);
+    const destinationSiteName = isCustom 
+      ? customSiteName.trim() 
+      : (site ? site.name : 'Décollage');
+
     const newRide: ShuttleRide = {
       id: `ride-${Date.now()}`,
       driverName: driverName.trim(),
       driverPhone: driverPhone.trim(),
       departurePlace,
       destinationSiteId,
-      destinationSiteName: site ? site.name : 'Décollage',
+      destinationSiteName,
       departureTime,
       availableSeats: totalSeats,
       totalSeats,
-      wingTypes: currentUser.wingModel ? `${currentUser.wingModel} / Tout sac` : 'Solo / Tandem',
+      wingTypes: currentUser?.wingModel ? `${currentUser.wingModel} / Tout sac` : 'Solo / Tandem',
       passengers: [],
       comment: comment.trim(),
       createdAt: new Date().toISOString(),
@@ -131,10 +161,20 @@ export const ShuttleBoard: React.FC = () => {
     setRides([newRide, ...rides]);
     setShowModal(false);
     setComment('');
+    setCustomSiteName('');
   };
 
   const handleJoinRide = (rideId: string) => {
-    const defaultName = currentUser.fullName || currentUser.discordUsername;
+    if (!isZelephMember(currentUser)) {
+      if (onRequireMemberAuth) {
+        onRequireMemberAuth("Pour réserver une place dans un covoiturage, connectez-vous avec votre compte Discord (statut minimum : Membre Z'éléph).");
+      } else if (onNavigateToMembers) {
+        onNavigateToMembers();
+      }
+      return;
+    }
+
+    const defaultName = currentUser ? (currentUser.fullName || currentUser.discordUsername) : '';
     const pilotName = window.prompt(`Confirmer votre place dans la navette sous le nom de :`, defaultName);
     if (!pilotName || !pilotName.trim()) return;
 
@@ -151,12 +191,20 @@ export const ShuttleBoard: React.FC = () => {
   };
 
   const handleDeleteRide = (ride: ShuttleRide) => {
+    if (!isZelephMember(currentUser)) {
+      if (onRequireMemberAuth) {
+        onRequireMemberAuth("Seul le conducteur ou un administrateur peut supprimer une annonce.");
+      }
+      return;
+    }
     setRideToDelete(ride);
   };
 
   const filteredRides = selectedSiteFilter === 'all'
     ? rides
-    : rides.filter(r => r.destinationSiteId === selectedSiteFilter);
+    : selectedSiteFilter === 'custom'
+      ? rides.filter(r => r.destinationSiteId === 'custom')
+      : rides.filter(r => r.destinationSiteId === selectedSiteFilter);
 
   return (
     <div className="space-y-6">
@@ -179,26 +227,59 @@ export const ShuttleBoard: React.FC = () => {
 
         <button
           onClick={handleOpenModal}
-          className="relative z-10 flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs sm:text-sm shadow-xl shadow-sky-500/20 transition-all active:scale-95"
+          className={`relative z-10 flex items-center justify-center gap-2 px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm shadow-xl transition-all active:scale-95 ${
+            isZelephMember(currentUser)
+              ? 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/20'
+              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 shadow-slate-900/50'
+          }`}
+          title={isZelephMember(currentUser) ? "Proposer une navette / un covoiturage" : "Mode Visiteur : connectez-vous avec Discord (statut Membre Z'éléph requis)"}
         >
-          <Plus className="w-4 h-4" />
-          <span>Proposer une montée</span>
+          {isZelephMember(currentUser) ? <Plus className="w-4 h-4" /> : <Lock className="w-4 h-4 text-amber-400" />}
+          <span>{isZelephMember(currentUser) ? 'Proposer une montée' : 'Connexion requise pour proposer'}</span>
         </button>
 
         {/* Ambient subtle glow */}
         <div className="absolute right-0 top-0 w-64 h-64 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
       </div>
 
-      {/* Member Profile Sync Indicator */}
-      <div className="bg-slate-900/40 border border-white/5 rounded-2xl px-4 py-2.5 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2 text-slate-300">
-          <UserCheck className="w-4 h-4 text-emerald-400" />
-          <span>Profil navette actif : <strong className="text-white">{currentUser.fullName}</strong> (@{currentUser.discordUsername})</span>
-          {currentUser.phone && <span className="text-slate-400 font-mono hidden sm:inline">• {currentUser.phone}</span>}
-          {currentUser.sector && <span className="text-slate-400 hidden md:inline">• Secteur {currentUser.sector}</span>}
+      {/* Member Profile Sync / Visitor Indicator */}
+      {currentUser && isZelephMember(currentUser) ? (
+        <div className="bg-slate-900/40 border border-emerald-500/20 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-slate-300">
+            <UserCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>Profil navette actif : <strong className="text-white">{currentUser.fullName}</strong> (@{currentUser.discordUsername})</span>
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[9px] font-bold">
+              Membre Z'éléph ✓
+            </span>
+            {currentUser.phone && <span className="text-slate-400 font-mono hidden sm:inline">• {currentUser.phone}</span>}
+            {currentUser.sector && <span className="text-slate-400 hidden md:inline">• Secteur {currentUser.sector}</span>}
+          </div>
+          <span className="text-[11px] text-emerald-400 font-medium">Droits de publication actifs</span>
         </div>
-        <span className="text-[11px] text-sky-400 font-medium">Synchronisé avec Espace Membres</span>
-      </div>
+      ) : (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-slate-300">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              Mode Visiteur (Lecture seule) : Vous visualisez les navettes. Pour proposer une montée ou réserver, connectez-vous avec votre compte Discord (statut minimum : <strong>Membre Z'éléph</strong>).
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (onRequireMemberAuth) {
+                onRequireMemberAuth("Pour proposer ou réserver une navette, connectez-vous avec votre compte Discord avec le statut minimum 'Membre Z'éléph'.");
+              } else if (onNavigateToMembers) {
+                onNavigateToMembers();
+              }
+            }}
+            className="text-xs text-indigo-400 hover:text-indigo-300 font-bold underline underline-offset-2 flex items-center gap-1 self-start sm:self-auto shrink-0"
+          >
+            <span>Se connecter avec Discord</span>
+            <span>→</span>
+          </button>
+        </div>
+      )}
 
       {/* Filter by destination site */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -226,12 +307,23 @@ export const ShuttleBoard: React.FC = () => {
             {s.name}
           </button>
         ))}
+        <button
+          onClick={() => setSelectedSiteFilter('custom')}
+          className={`text-xs px-3.5 py-1.5 rounded-xl font-medium transition whitespace-nowrap ${
+            selectedSiteFilter === 'custom'
+              ? 'bg-purple-500 text-white font-bold shadow-lg shadow-purple-500/20'
+              : 'bg-slate-900/60 border border-white/5 text-slate-400 hover:text-purple-300 hover:bg-white/5'
+          }`}
+        >
+          Sites extérieurs / Autres
+        </button>
       </div>
 
       {/* Rides List */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredRides.map(ride => {
           const isFull = ride.availableSeats <= 0;
+          const isCustomSite = ride.destinationSiteId === 'custom';
           return (
             <div
               key={ride.id}
@@ -241,9 +333,16 @@ export const ShuttleBoard: React.FC = () => {
                 {/* Card Top: Destination & Time */}
                 <div className="flex items-start justify-between gap-2 mb-4">
                   <div>
-                    <span className="text-[10px] font-mono font-bold text-sky-400 uppercase tracking-widest block mb-0.5">
-                      {ride.destinationSiteName}
-                    </span>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-[10px] font-mono font-bold text-sky-400 uppercase tracking-widest block">
+                        {ride.destinationSiteName}
+                      </span>
+                      {isCustomSite && (
+                        <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-bold uppercase tracking-wider">
+                          Site extérieur
+                        </span>
+                      )}
+                    </div>
                     <h3 className="font-bold text-white text-lg tracking-tight">
                       {ride.driverName}
                     </h3>
@@ -338,7 +437,9 @@ export const ShuttleBoard: React.FC = () => {
 
       {filteredRides.length === 0 && (
         <div className="p-8 text-center bg-slate-900/40 backdrop-blur-md rounded-3xl border border-white/5 text-slate-400 text-sm">
-          Aucune navette pour ce décollage pour l'instant. Proposez-en une pour lancer la rotation du club !
+          {selectedSiteFilter === 'custom'
+            ? "Aucune navette vers un site extérieur pour le moment. Proposez la vôtre vers Saint-Hilaire, Annecy, Chamoux, ou un autre décollage !"
+            : "Aucune navette pour ce décollage pour l'instant. Proposez-en une pour lancer la rotation du club !"}
         </div>
       )}
 
@@ -417,9 +518,14 @@ export const ShuttleBoard: React.FC = () => {
                     onChange={e => setDestinationSiteId(e.target.value)}
                     className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-sky-400"
                   >
-                    {ZELEPH_SITES.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
+                    <optgroup label="Sites du club & locaux">
+                      {ZELEPH_SITES.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} ({s.massif})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Autre destination">
+                      <option value="custom">Autre (renseigner manuellement...)</option>
+                    </optgroup>
                   </select>
                 </div>
 
@@ -437,6 +543,26 @@ export const ShuttleBoard: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {/* Champ conditionnel pour site personnalisé */}
+              {destinationSiteId === 'custom' && (
+                <div className="p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/30 space-y-1.5">
+                  <label className="block text-xs font-semibold text-purple-300 uppercase tracking-wider">
+                    Nom du décollage ou site extérieur *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Saint-Hilaire (Chartreuse), Montmin (Annecy), Chamoux, Aiguebelette Ouest..."
+                    value={customSiteName}
+                    onChange={e => setCustomSiteName(e.target.value)}
+                    className="w-full bg-slate-900 border border-purple-500/40 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-purple-400"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Indiquez le nom du site et éventuellement la commune ou le massif pour que les passagers sachent où vous vous rendez.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">

@@ -198,7 +198,7 @@ export const SafetySOS: React.FC = () => {
         </a>
 
         <a
-          href="tel:0479378484"
+          href="tel:0479070110"
           className="bg-slate-900/40 hover:bg-slate-900/60 border border-white/5 hover:border-white/10 p-5 rounded-3xl transition flex items-center gap-4 group backdrop-blur-md"
         >
           <div className="p-3.5 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
@@ -208,22 +208,22 @@ export const SafetySOS: React.FC = () => {
             <h4 className="font-bold text-white text-sm group-hover:text-sky-300 transition">
               PGHM Savoie
             </h4>
-            <p className="text-xs text-slate-400 font-mono">04 79 37 84 84 (Modane / Albertville)</p>
+            <p className="text-xs text-slate-400 font-mono">04 79 07 01 10</p>
           </div>
         </a>
 
         <a
-          href="tel:0476775770"
+          href="tel:0476222222"
           className="bg-slate-900/40 hover:bg-slate-900/60 border border-white/5 hover:border-white/10 p-5 rounded-3xl transition flex items-center gap-4 group backdrop-blur-md"
         >
           <div className="p-3.5 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
             <PhoneCall className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="font-bold text-white text-sm group-hover:text-indigo-300 transition">
-              CRS Alpes Secours
+            <h4 className="font-bold text-white text-sm group-hover:text-indigo-300 transition leading-snug">
+              Numéro d'alerte unifié des secours en montagne - Savoie du Nord
             </h4>
-            <p className="text-xs text-slate-400 font-mono">04 76 77 57 70 (Grenoble / Chartreuse)</p>
+            <p className="text-xs text-slate-400 font-mono">04.76.22.22.22</p>
           </div>
         </a>
       </div>

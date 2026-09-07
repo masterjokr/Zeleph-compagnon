@@ -85,11 +85,19 @@ export const FlyableSitesModal: React.FC<FlyableSitesModalProps> = ({
         {/* Modal Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-4 no-scrollbar">
           {/* AI & Algorithmic Notice Banner */}
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 sm:p-4 flex items-center gap-3 text-xs text-amber-200">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <p className="leading-relaxed">
-              <strong>Analyse automatisée / IA :</strong> Ces statuts sont calculés à titre purement indicatif par croisement de données balises et de seuils aérologiques. <strong>Rien ne remplace votre propre analyse in situ</strong> et votre jugement de pilote commandant de bord.
-            </p>
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 sm:p-4 flex items-start gap-3 text-xs text-amber-200">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-1 leading-relaxed">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2 py-0.5 rounded bg-amber-500/25 border border-amber-500/40 text-[10px] font-mono font-bold text-amber-300 uppercase">
+                  Exemple - En cours de création
+                </span>
+                <strong className="text-white">Diagnostic indicatif</strong>
+              </div>
+              <p>
+                Ces statuts sont calculés à titre d'exemple par croisement de modèles météo locaux (rappel : tous les sites n'ont pas de balise physique, comme à Vérel où les pilotes recoupent les balises des environs). <strong>Rien ne remplace votre propre analyse in situ.</strong>
+              </p>
+            </div>
           </div>
 
           {flyableSites.length === 0 ? (

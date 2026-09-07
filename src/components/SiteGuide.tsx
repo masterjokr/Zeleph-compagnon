@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ZELEPH_SITES } from '../data/sitesData';
-import { ParaglidingSite, LiveBeaconData } from '../types';
+import { ParaglidingSite, ClubMemberProfile } from '../types';
 import { 
   Compass, 
   ArrowUpRight, 
@@ -12,26 +12,65 @@ import {
   Gauge,
   Info,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  Edit3,
+  RotateCcw,
+  Sparkles,
+  Check,
+  Calendar,
+  UserCheck,
+  Wind
 } from 'lucide-react';
+import { EditSiteModal } from './EditSiteModal';
+import { isZelephMember } from '../utils/authUtils';
+import { 
+  getSiteOverridesMap, 
+  saveSiteOverride, 
+  resetSiteOverride 
+} from '../utils/storageService';
 
 interface SiteGuideProps {
-  beacons: LiveBeaconData[];
-  onSelectBeaconTab: (siteId: string) => void;
   selectedSiteId?: string;
   onSelectSite?: (siteId: string) => void;
-  initialFilterFlyable?: boolean;
+  currentUser?: ClubMemberProfile | null;
+  onRequireMemberAuth?: (reason: string) => void;
 }
 
 export const SiteGuide: React.FC<SiteGuideProps> = ({ 
-  beacons, 
-  onSelectBeaconTab,
   selectedSiteId: controlledSiteId,
   onSelectSite,
-  initialFilterFlyable = false
+  currentUser,
+  onRequireMemberAuth
 }) => {
   const [internalSiteId, setInternalSiteId] = useState<string>('verel');
-  const [filterMassif, setFilterMassif] = useState<string>(initialFilterFlyable ? 'flyable' : 'all');
+  const [filterMassif, setFilterMassif] = useState<string>('all');
+
+  // Overrides stored in storageService
+  const [siteOverrides, setSiteOverrides] = useState<Record<string, ParaglidingSite>>(() => {
+    return getSiteOverridesMap();
+  });
+
+  // Modal & Toast states
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [siteToReset, setSiteToReset] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
+
+  // Merge default sites with custom overrides
+  const sites = useMemo(() => {
+    return ZELEPH_SITES.map(s => {
+      if (siteOverrides[s.id]) {
+        return { ...s, ...siteOverrides[s.id] };
+      }
+      return s;
+    });
+  }, [siteOverrides]);
 
   const activeSiteId = controlledSiteId || internalSiteId;
   const handleSelectSite = (siteId: string) => {
@@ -39,61 +78,88 @@ export const SiteGuide: React.FC<SiteGuideProps> = ({
     if (onSelectSite) onSelectSite(siteId);
   };
 
-  const selectedSite = ZELEPH_SITES.find(s => s.id === activeSiteId) || ZELEPH_SITES[0];
-  const siteBeacon = beacons.find(b => b.siteId === selectedSite.id);
+  const selectedSite = sites.find(s => s.id === activeSiteId) || sites[0];
+  const isSelectedSiteCustomized = Boolean(siteOverrides[selectedSite.id]);
 
   const massifs = ['all', 'Bauges', 'Combe de Savoie', 'Avant-Pays Savoyard'];
 
-  const flyableCount = beacons.filter(b => b.status === 'optimal' || b.status === 'moderate').length;
-
-  const filteredSites = ZELEPH_SITES.filter(s => {
+  const filteredSites = sites.filter(s => {
     if (filterMassif === 'all') return true;
-    if (filterMassif === 'flyable') {
-      const b = beacons.find(beacon => beacon.siteId === s.id);
-      return b && (b.status === 'optimal' || b.status === 'moderate');
-    }
     return s.massif === filterMassif;
   });
 
+  // Save updated site
+  const handleSaveSite = (updatedSite: ParaglidingSite) => {
+    saveSiteOverride(updatedSite);
+    setSiteOverrides(prev => ({ ...prev, [updatedSite.id]: updatedSite }));
+    showToast(`La fiche du site "${updatedSite.name}" a été mise à jour avec succès !`);
+  };
+
+  // Reset site to club default
+  const handleResetSite = (siteId: string) => {
+    resetSiteOverride(siteId);
+    setSiteOverrides(prev => {
+      const next = { ...prev };
+      delete next[siteId];
+      return next;
+    });
+    showToast(`La fiche du site a été réinitialisée aux informations d'origine.`);
+  };
+
   return (
     <div className="space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-sky-500 text-slate-950 font-bold px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 border border-white/20 animate-fade-in">
+          <Sparkles className="w-5 h-5" />
+          <span className="text-xs sm:text-sm">{toastMessage}</span>
+        </div>
+      )}
+
       {/* Introduction banner */}
       <div className="relative overflow-hidden rounded-3xl bg-slate-900/40 backdrop-blur-md border border-white/5 p-6 sm:p-8 shadow-2xl">
         <div className="relative z-10 max-w-3xl">
           <div className="inline-flex items-center gap-2 bg-sky-500/10 text-sky-400 border border-sky-500/20 text-[10px] font-mono font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full mb-3">
             <span>Massifs de Savoie • Lac du Bourget • Bauges</span>
           </div>
-          <h1 className="text-2xl sm:text-4xl font-light tracking-tight text-white">
-            Guide des Sites & <span className="font-bold text-sky-400">Décollages Club</span>
-          </h1>
-          <p className="mt-2 text-xs sm:text-sm text-slate-400 leading-relaxed max-w-2xl">
-            Fiches techniques des sites gérés et fréquentés par le club autour du bassin chambérien, de la cluse de Savoie et du Lac du Bourget. Consignes de vol, aérologie et espace aérien.
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-4xl font-light tracking-tight text-white">
+                Guide des Sites & <span className="font-bold text-sky-400">Décollages Club</span>
+              </h1>
+              <p className="mt-2 text-xs sm:text-sm text-slate-400 leading-relaxed max-w-2xl">
+                Fiches techniques officielles des sites de décollage et atterrissage de Savoie gérés ou fréquentés par les Z’éléphants Volants. Accès, aérologie, finesses requises, restrictions et webcams.
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                if (!isZelephMember(currentUser)) {
+                  if (onRequireMemberAuth) {
+                    onRequireMemberAuth("La modification des fiches de site est réservée aux pilotes connectés avec un compte Google.");
+                  } else {
+                    showToast("Connectez-vous avec Google pour modifier une fiche.");
+                  }
+                  return;
+                }
+                setIsEditModalOpen(true);
+              }}
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs sm:text-sm transition shadow-lg shadow-sky-500/20 shrink-0 active:scale-95"
+            >
+              <Edit3 className="w-4 h-4" />
+              <span>Modifier la fiche site</span>
+            </button>
+          </div>
         </div>
         <div className="absolute -right-8 -bottom-10 opacity-5 pointer-events-none">
           <Compass className="w-72 h-72 text-sky-400" />
         </div>
       </div>
 
-      {/* Massif & Flyability Filters */}
+      {/* Massif Filters */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-        <span className="text-xs text-slate-400 font-semibold uppercase tracking-widest pl-1">Filtre :</span>
+        <span className="text-xs text-slate-400 font-semibold uppercase tracking-widest pl-1">Massif :</span>
         
-        {/* Flyable live filter button */}
-        <button
-          onClick={() => setFilterMassif(filterMassif === 'flyable' ? 'all' : 'flyable')}
-          className={`text-xs px-3.5 py-1.5 rounded-xl font-medium transition whitespace-nowrap flex items-center gap-1.5 ${
-            filterMassif === 'flyable'
-              ? 'bg-emerald-500 text-slate-950 font-bold shadow-lg shadow-emerald-500/20'
-              : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20'
-          }`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${filterMassif === 'flyable' ? 'bg-slate-950' : 'bg-emerald-400 animate-pulse'}`} />
-          <span>Volables en direct ({flyableCount})</span>
-        </button>
-
-        <div className="w-[1px] h-4 bg-white/10 mx-1" />
-
         {massifs.map((m) => (
           <button
             key={m}
@@ -101,106 +167,101 @@ export const SiteGuide: React.FC<SiteGuideProps> = ({
             className={`text-xs px-3.5 py-1.5 rounded-xl font-medium transition whitespace-nowrap ${
               filterMassif === m
                 ? 'bg-sky-500 text-slate-950 font-bold shadow-lg shadow-sky-500/20'
-                : 'bg-slate-900/60 border border-white/5 text-slate-400 hover:text-white hover:bg-white/5'
+                : 'bg-white/5 border border-white/5 text-slate-300 hover:bg-white/10'
             }`}
           >
-            {m === 'all' ? `Tous les sites (${ZELEPH_SITES.length})` : m}
+            {m === 'all' ? 'Tous les sites' : m}
           </button>
         ))}
       </div>
 
-      {/* Sites Quick Grid & Detail Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Side: Sites List */}
         <div className="lg:col-span-5 space-y-3">
           <div className="flex items-center justify-between px-1">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-              {filterMassif === 'flyable' ? 'Sites praticables aujourd’hui' : 'Sélectionnez un site'}
-            </h2>
-            <span className="text-[11px] font-mono text-slate-500">
-              {filteredSites.length} site(s)
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              {filteredSites.length} site{filteredSites.length > 1 ? 's' : ''} répertorié{filteredSites.length > 1 ? 's' : ''}
             </span>
+            {Object.keys(siteOverrides).length > 0 && (
+              <span className="text-[10px] font-mono text-sky-400 flex items-center gap-1">
+                <Sparkles className="w-3 h-3" />
+                <span>{Object.keys(siteOverrides).length} fiche(s) actualisée(s)</span>
+              </span>
+            )}
           </div>
 
           {filteredSites.length === 0 ? (
-            <div className="p-8 rounded-3xl bg-slate-900/40 border border-white/5 text-center text-xs text-slate-400">
-              Aucun site ne correspond actuellement à ce filtre.
-              <button 
+            <div className="p-8 text-center rounded-3xl bg-slate-900/40 border border-white/5 space-y-2">
+              <Compass className="w-8 h-8 text-slate-600 mx-auto" />
+              <p className="text-xs text-slate-400">Aucun site ne correspond aux critères sélectionnés.</p>
+              <button
                 onClick={() => setFilterMassif('all')}
-                className="block mx-auto mt-2 text-sky-400 hover:underline font-semibold"
+                className="text-xs text-sky-400 hover:underline"
               >
-                Afficher tous les sites
+                Réinitialiser les filtres
               </button>
             </div>
           ) : (
             <div className="space-y-3">
               {filteredSites.map((site) => {
                 const isSelected = site.id === selectedSite.id;
-                const live = beacons.find(b => b.siteId === site.id);
+                const isCustomized = Boolean(siteOverrides[site.id]);
+
                 return (
                   <div
                     key={site.id}
-                    id={`site-card-${site.id}`}
                     onClick={() => handleSelectSite(site.id)}
-                  className={`p-5 rounded-3xl cursor-pointer transition-all border backdrop-blur-md ${
-                    isSelected
-                      ? 'bg-gradient-to-br from-slate-900/90 to-slate-950/90 border-sky-400/80 ring-1 ring-sky-400/30 shadow-xl shadow-sky-950/50'
-                      : 'bg-slate-900/40 border-white/5 hover:border-white/10 hover:bg-slate-900/60'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-white text-base tracking-tight">{site.name}</h3>
-                        <span className="text-[10px] font-mono font-bold bg-white/5 text-sky-400 border border-white/5 px-2 py-0.5 rounded-full">
-                          {site.massif}
+                    className={`p-4 sm:p-5 rounded-2xl cursor-pointer transition-all border text-left relative overflow-hidden group ${
+                      isSelected
+                        ? 'bg-slate-900/90 border-sky-500/60 shadow-xl shadow-sky-500/10 ring-1 ring-sky-500/30'
+                        : 'bg-slate-900/40 border-white/5 hover:bg-slate-900/60 hover:border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-white/5 text-slate-400">
+                            {site.massif}
+                          </span>
+                          {isCustomized && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                              <Sparkles className="w-2.5 h-2.5" />
+                              <span>Infos à jour</span>
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="font-bold text-white text-base sm:text-lg group-hover:text-sky-300 transition-colors">
+                          {site.name}
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
+                          {site.subTitle}
+                        </p>
+                      </div>
+
+                      {/* Site Altitude Pill */}
+                      <div className="shrink-0 text-right">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                          {site.takeoffAlt}m
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+                          Décollage
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-1 line-clamp-1">{site.subTitle}</p>
                     </div>
-                    {live && (
-                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold shrink-0 ${
-                        live.status === 'optimal' 
-                          ? 'bg-emerald-400/10 text-emerald-400 border border-emerald-400/30'
-                          : live.status === 'moderate'
-                          ? 'bg-amber-400/10 text-amber-400 border border-amber-400/30'
-                          : 'bg-rose-400/10 text-rose-400 border border-rose-400/30'
-                      }`}>
-                        {live.windSpeed} km/h {live.windDirectionText}
-                      </span>
-                    )}
-                  </div>
 
-                  <div className="mt-4 flex items-center justify-between text-xs text-slate-400 pt-3 border-t border-white/5">
-                    <div className="flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Déco <strong className="font-mono text-slate-300">{site.takeoffAlt}m</strong> • D- <strong className="font-mono text-slate-300">{site.elevationDiff}m</strong></span>
-                    </div>
-                    <div className="flex items-center gap-1 text-slate-300 font-mono text-xs">
-                      <span>Finesse {site.finesseRequired}</span>
+                    <div className="mt-3 flex items-center justify-between text-xs text-slate-400 pt-3 border-t border-white/5">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Dénivelé : {site.elevationDiff}m</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono text-slate-300">{site.orientations.join(' ')}</span>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[11px]">
-                    <div className="flex items-center gap-1.5 text-amber-300/90 font-mono">
-                      <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Créneau : <strong className="text-amber-200">{site.recommendedHours}</strong></span>
-                    </div>
-                    {site.id === 'montlambert' && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                        Abrité en Nord
-                      </span>
-                    )}
-                    {site.id === 'verel' && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
-                        + Nord-Ouest
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
           )}
         </div>
 
@@ -210,23 +271,57 @@ export const SiteGuide: React.FC<SiteGuideProps> = ({
             {/* Header */}
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="px-2.5 py-0.5 text-xs font-mono font-bold rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">
                     {selectedSite.massif}
                   </span>
                   <span className="px-2.5 py-0.5 text-xs font-medium rounded-full bg-white/5 text-slate-300 border border-white/5">
                     Niveau : {selectedSite.level}
                   </span>
+
+                  {isSelectedSiteCustomized && (
+                    <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3" />
+                      <span>Fiche actualisée</span>
+                    </span>
+                  )}
                 </div>
-                {siteBeacon && (
+
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => onSelectBeaconTab(selectedSite.id)}
-                    className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 transition font-medium"
+                    onClick={() => {
+                      if (!isZelephMember(currentUser)) {
+                        if (onRequireMemberAuth) {
+                          onRequireMemberAuth("La modification des fiches de site est réservée aux membres connectés avec Discord (statut minimum : Membre Z'éléph).");
+                        } else {
+                          setToastMessage("Action réservée aux membres Zéléph connectés.");
+                          setTimeout(() => setToastMessage(null), 3500);
+                        }
+                        return;
+                      }
+                      setIsEditModalOpen(true);
+                    }}
+                    className={`p-2 rounded-xl transition text-xs font-semibold flex items-center gap-1.5 ${
+                      isZelephMember(currentUser)
+                        ? 'bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 hover:text-white border border-sky-500/30'
+                        : 'bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-slate-300 border border-slate-700'
+                    }`}
+                    title={isZelephMember(currentUser) ? "Modifier les informations de cette fiche de site" : "Mode Visiteur : connectez-vous avec Discord (Membre Z'éléph) pour modifier la fiche"}
                   >
-                    <span>Voir balise en direct</span>
-                    <ArrowUpRight className="w-3.5 h-3.5" />
+                    <Edit3 className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Modifier la fiche</span>
                   </button>
-                )}
+
+                  {isSelectedSiteCustomized && isZelephMember(currentUser) && (
+                    <button
+                      onClick={() => setSiteToReset(selectedSite.id)}
+                      className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-300 transition text-xs"
+                      title="Rétablir les informations par défaut du club"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <h2 className="text-3xl sm:text-4xl font-light tracking-tight text-white">
@@ -235,6 +330,26 @@ export const SiteGuide: React.FC<SiteGuideProps> = ({
               <p className="text-xs sm:text-sm text-slate-400 mt-1">
                 {selectedSite.subTitle}
               </p>
+
+              {/* Updated information banner if edited */}
+              {isSelectedSiteCustomized && (
+                <div className="mt-3 p-3 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-sky-400" />
+                    <div>
+                      <span className="font-bold text-white">Infos adaptées pour la saison en cours</span>
+                      {selectedSite.updatedBy && (
+                        <span className="text-[11px] text-slate-400 block">Dernière mise à jour par : {selectedSite.updatedBy}</span>
+                      )}
+                    </div>
+                  </div>
+                  {selectedSite.lastUpdatedDate && (
+                    <span className="text-[11px] text-sky-300 font-mono shrink-0">
+                      {selectedSite.lastUpdatedDate}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Quick Metrics Bar */}
@@ -305,32 +420,34 @@ export const SiteGuide: React.FC<SiteGuideProps> = ({
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                {selectedSite.bestTimeSlots.map((slot, idx) => (
-                  <div 
-                    key={idx}
-                    className={`p-3.5 rounded-xl border transition-all ${
-                      slot.isOptimal 
-                        ? 'bg-emerald-500/10 border-emerald-500/30 shadow-sm' 
-                        : 'bg-slate-950/60 border-white/5'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="font-semibold text-xs text-white">
-                        {slot.period}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded font-mono font-bold text-[11px] ${
-                        slot.isOptimal ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/30' : 'bg-white/10 text-slate-300 border border-white/5'
-                      }`}>
-                        {slot.hours}
-                      </span>
+              {selectedSite.bestTimeSlots && selectedSite.bestTimeSlots.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {selectedSite.bestTimeSlots.map((slot, idx) => (
+                    <div 
+                      key={idx}
+                      className={`p-3.5 rounded-xl border transition-all ${
+                        slot.isOptimal 
+                          ? 'bg-emerald-500/10 border-emerald-500/30 shadow-sm' 
+                          : 'bg-slate-950/60 border-white/5'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="font-semibold text-xs text-white">
+                          {slot.period}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded font-mono font-bold text-[11px] ${
+                          slot.isOptimal ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/30' : 'bg-white/10 text-slate-300 border border-white/5'
+                        }`}>
+                          {slot.hours}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {slot.description}
+                      </p>
                     </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      {slot.description}
-                    </p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Description & Aerology */}
@@ -435,6 +552,59 @@ export const SiteGuide: React.FC<SiteGuideProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Edit Site Modal */}
+      <EditSiteModal
+        site={selectedSite}
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onSave={handleSaveSite}
+        onResetToDefault={handleResetSite}
+        isCustomized={isSelectedSiteCustomized}
+        currentUser={currentUser}
+      />
+
+      {/* In-App Reset Confirmation Modal */}
+      {siteToReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/15 flex items-center justify-center border border-amber-500/30">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Rétablir la fiche d'origine</h3>
+                <span className="text-[11px] text-slate-400">Restitution des données club de base</span>
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Voulez-vous réinitialiser la fiche du site <strong className="text-white">« {selectedSite.name} »</strong> aux informations officielles du club ? Toutes les modifications saisonnières personnalisées seront effacées.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setSiteToReset(null)}
+                className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold transition"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleResetSite(siteToReset);
+                  setSiteToReset(null);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition shadow-lg shadow-amber-500/20 flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Rétablir les données club</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

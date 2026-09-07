@@ -1,6 +1,6 @@
 {
   "name": "Zéleph Vol Libre - Compagnon Parapente",
-  "description": "Application PWA & Android pour les membres du club de parapente Les Z'éléphants Volants (Chambéry / Savoie) : balises météo en direct, fiches de sites, calendrier des sorties club, espace membres Discord & covoit navettes.",
+  "description": "Application PWA pour les membres et pilotes du club de parapente Les Z'éléphants Volants (Chambéry / Savoie) : carte LiveTracking des pilotes en vol, fiches techniques des sites et décollages, calendrier des sorties club, profil pilote Google et covoit navettes.",
   "requestFramePermissions": [
     "geolocation"
   ],

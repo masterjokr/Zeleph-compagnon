@@ -1,3 +1,5 @@
+export type AppTheme = 'dark' | 'light';
+
 export type WindDirection = 
   | 'N' | 'NNE' | 'NE' | 'ENE' 
   | 'E' | 'ESE' | 'SE' | 'SSE' 
@@ -37,6 +39,8 @@ export interface ParaglidingSite {
     description: string;
     isOptimal?: boolean;
   }[];
+  lastUpdatedDate?: string;
+  updatedBy?: string;
 }
 
 export interface LiveBeaconData {
@@ -85,6 +89,13 @@ export interface HikeAndFlyTopo {
   description: string;
   itinerary: string[];
   takeoffTip: string;
+  authorName?: string;
+  authorId?: string;
+  authorRole?: string;
+  createdAt?: string;
+  isCommunity?: boolean;
+  orientation?: string;
+  recommendedSeason?: string;
 }
 
 export type PilotLevel = 
@@ -95,30 +106,78 @@ export type PilotLevel =
   | 'Biplaceur Fédéral' 
   | 'Moniteur Fédéral';
 
+export type LiveTrackingPlatform = 
+  | 'ogn' 
+  | 'puretrack' 
+  | 'flymaster' 
+  | 'syride' 
+  | 'livetrack24' 
+  | 'garmin' 
+  | 'autre';
+
 export interface ClubMemberProfile {
   id: string;
-  discordId?: string;
-  discordUsername: string;
-  discordDiscriminator?: string;
-  discordAvatarUrl: string;
-  discordRole: string; // e.g. "Adhérent Zéleph 2026", "Pilote Cross", "Bureau", "Moniteur"
   fullName: string;
-  phone: string;
   email: string;
+  googleEmail?: string;
+  avatarUrl?: string;
+  role?: string; // e.g. "Super-Administrateur Club • Les Z’éléphants Volants", "Monitrice Fédérale & Bureau", "Adhérent Zéléph 2026"
+  phone: string;
   pilotLevel: PilotLevel;
   wingModel: string; // e.g. "Ozone Alpina 4"
   wingColor: string; // e.g. "Bleu / Jaune / Blanc"
-  harness: string; // e.g. "Kavik cocon / Supair Strike"
+  harness: string; // e.g. "Supair Strike 2"
   sector: string; // e.g. "Chambéry Centre", "Saint-Alban-Leysse", "Barberaz", "Aix-les-Bains"
   vehicleInfo: string; // e.g. "Berlingo 4 places + grand coffre"
   availableSeats: number;
   emergencyContactName: string;
   emergencyContactPhone: string;
-  radioFrequency: string; // default "146.500 MHz"
+  radioFrequency: string; // default "146.500 MHz (Club Zéléph)"
   bio?: string;
-  isDiscordConnected: boolean;
   isSuperAdmin?: boolean;
+  isExample?: boolean;
+  isGoogleConnected?: boolean;
+  isGoogleVerified?: boolean;
   joinedClubYear: number;
+
+  // LiveTracking configuration
+  liveTrackingPlatform?: LiveTrackingPlatform;
+  liveTrackingId?: string; // e.g. OGN Callsign, PureTrack handle, Flymaster ID, Syride pilot link
+  shareLiveTracking?: boolean; // Accept to be broadcast on the club general live tracking map
+
+  // Legacy compatibility fields
+  discordId?: string;
+  discordUsername?: string;
+  discordDiscriminator?: string;
+  discordAvatarUrl?: string;
+  discordRole?: string;
+  isDiscordConnected?: boolean;
+}
+
+export interface LivePilotTrack {
+  pilotId: string;
+  pilotName: string;
+  avatarUrl: string;
+  googleEmail?: string;
+  wingModel: string;
+  wingColor: string;
+  lat: number;
+  lng: number;
+  altitude: number; // in meters
+  groundSpeed: number; // in km/h
+  vario: number; // in m/s (+2.4, -0.8...)
+  headingDeg: number; // heading 0-360
+  lastUpdate: string; // "14:32:05" or "Il y a 1 min"
+  status: 'flying' | 'climbing' | 'landed' | 'takeoff';
+  siteNear: string; // e.g. "Verel - Nivolet", "Dent du Chat", "Montlambert"
+  batteryLevel?: number; // 0-100%
+  platform: LiveTrackingPlatform;
+  platformLabel: string;
+  platformId?: string;
+  phone?: string;
+  radioFrequency?: string;
+  emergencyContact?: string;
+  outingId?: string; // Optional: associated outing for future per-outing livetracking
 }
 
 export type OutingCategory = 
@@ -135,6 +194,7 @@ export interface OutingParticipant {
   id: string;
   name: string;
   avatar?: string;
+  role?: string;
   discordRole?: string;
   phone?: string;
   wing?: string;

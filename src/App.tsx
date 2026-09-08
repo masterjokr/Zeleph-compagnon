@@ -11,7 +11,7 @@ import { ClubOutingsCalendar } from './components/ClubOutingsCalendar';
 import { OfflineBadge } from './components/OfflineBadge';
 import { WelcomeAccessModal } from './components/WelcomeAccessModal';
 import { AdminGoogleAuthModal } from './components/AdminGoogleAuthModal';
-import { ClubMemberProfile } from './types';
+import { ClubMemberProfile, AppTheme } from './types';
 import { Radio, ExternalLink, Globe, Sparkles, CheckCircle2, Crown, Compass } from 'lucide-react';
 import { 
   isSuperAdminEmail, 
@@ -22,7 +22,9 @@ import {
   getStoredActiveUser, 
   saveStoredActiveUser, 
   clearStoredActiveUser, 
-  savePilotProfile 
+  savePilotProfile,
+  getStoredTheme,
+  saveStoredTheme
 } from './utils/storageService';
 
 const WELCOME_DISMISSED_KEY = 'zeleph_welcome_dismissed_v1';
@@ -31,6 +33,16 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('sites');
   const [selectedSiteId, setSelectedSiteId] = useState<string>('verel');
   
+  // Theme state: dark by default as loved by user, with toggle to light
+  const [theme, setTheme] = useState<AppTheme>(() => getStoredTheme());
+
+  const handleToggleTheme = () => {
+    const next: AppTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    saveStoredTheme(next);
+    showToast(next === 'light' ? "Thème clair activé ☀️" : "Thème sombre activé 🌙");
+  };
+
   // Super-admin dedicated modal state
   const [isAdminGoogleModalOpen, setIsAdminGoogleModalOpen] = useState<boolean>(false);
 
@@ -106,7 +118,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-100 flex flex-col font-sans selection:bg-sky-500 selection:text-slate-950 relative overflow-x-hidden">
+    <div className={`min-h-screen ${theme === 'light' ? 'theme-light bg-slate-50 text-slate-800' : 'theme-dark bg-[#020617] text-slate-100'} flex flex-col font-sans selection:bg-sky-500 selection:text-slate-950 relative overflow-x-hidden transition-colors duration-200`}>
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-sky-500 text-slate-950 font-bold px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2 border border-white/20 animate-fade-in">
@@ -142,6 +154,8 @@ export default function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenWelcomeModal={() => handleOpenWelcome()}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
       {/* Cockpit HUD Sub-Header */}
@@ -275,6 +289,7 @@ export default function App() {
             currentUser={currentUser}
             onLogin={handleLogin}
             onLogout={handleLogout}
+            onOpenGoogleAuth={() => handleOpenWelcome("Connexion Google requise : Pour créer ou gérer votre fiche pilote officielle, veuillez vous connecter avec votre compte Google.")}
             onNavigateToShuttles={() => {
               setActiveTab('navettes');
               window.scrollTo({ top: 0, behavior: 'smooth' });

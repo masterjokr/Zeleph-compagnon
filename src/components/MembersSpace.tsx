@@ -32,7 +32,8 @@ import {
   Camera,
   Upload,
   Image as ImageIcon,
-  RotateCcw
+  RotateCcw,
+  CheckCircle2
 } from 'lucide-react';
 import { isZelephMember } from '../utils/authUtils';
 import { 
@@ -51,6 +52,7 @@ interface MembersSpaceProps {
   currentUser: ClubMemberProfile | null;
   onLogin: (profile: ClubMemberProfile) => void;
   onLogout: () => void;
+  onOpenGoogleAuth?: () => void;
   onNavigateToShuttles?: () => void;
   onNavigateToOutings?: () => void;
 }
@@ -59,6 +61,7 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
   currentUser,
   onLogin,
   onLogout,
+  onOpenGoogleAuth,
   onNavigateToShuttles,
   onNavigateToOutings
 }) => {
@@ -67,6 +70,12 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
     return getStoredClubDirectory();
   });
 
+  // Verify Super-Admin rights
+  const isSuperAdmin = Boolean(
+    currentUser?.isSuperAdmin || 
+    (currentUser && isSuperAdminEmail(currentUser.googleEmail || currentUser.email))
+  );
+
   // Search and filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterLevel, setFilterLevel] = useState<string>('all');
@@ -74,6 +83,7 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
 
   // Profile Edit modal
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingTargetPilot, setEditingTargetPilot] = useState<ClubMemberProfile | null>(null);
   const [editForm, setEditForm] = useState<Partial<ClubMemberProfile>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -88,21 +98,36 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
 
   const handleConfirmDeleteMember = () => {
     if (!memberToDelete) return;
-    const targetName = memberToDelete.fullName;
     const isSelf = currentUser?.id === memberToDelete.id;
+
+    // Security check: Only Super-Admin or self can delete
+    if (!isSuperAdmin && !isSelf) {
+      showToast("Action refusée : Seul le super-administrateur peut supprimer d'autres membres.");
+      setMemberToDelete(null);
+      return;
+    }
+
+    const targetName = memberToDelete.fullName;
     const updated = deleteClubMember(memberToDelete.id);
     setDirectory(updated);
     setMemberToDelete(null);
 
     if (isSelf) {
       onLogout();
-      showToast(`Votre profil (${targetName}) a été supprimé de la base de données.`);
+      showToast(`Votre profil (${targetName}) a été supprimé.`);
     } else {
-      showToast(`Le membre "${targetName}" a bien été retiré de l'annuaire du club.`);
+      showToast(`Le membre "${targetName}" a été retiré de l'annuaire.`);
     }
   };
 
   const handleConfirmPurgeExamples = () => {
+    // Security check: Only Super-Admin can purge example members
+    if (!isSuperAdmin) {
+      showToast("Action refusée : Seul le super-administrateur peut purger les profils d'exemple.");
+      setShowPurgeExamplesModal(false);
+      return;
+    }
+
     const updated = deleteAllExampleMembers();
     setDirectory(updated);
     setShowPurgeExamplesModal(false);
@@ -125,88 +150,97 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
     reader.readAsDataURL(file);
   };
 
+  // Open edit for current user (or prompt visitor to login with Google)
   const handleOpenEdit = () => {
-    if (currentUser) {
-      setEditForm({ ...currentUser });
-    } else {
-      setEditForm({
-        id: `usr-google-${Date.now()}`,
-        fullName: '',
-        email: '',
-        googleEmail: '',
-        role: "Pilote Club • Les Z'éléphants Volants",
-        pilotLevel: 'Brevet Initial (Autonome sur site calme)',
-        wingModel: '',
-        wingColor: '',
-        harness: '',
-        sector: 'Chambéry & Bassin',
-        vehicleInfo: '',
-        availableSeats: 2,
-        emergencyContactName: '',
-        emergencyContactPhone: '',
-        radioFrequency: '146.500 MHz (Club Zéléph)',
-        bio: '',
-        isGoogleConnected: true,
-        isGoogleVerified: true,
-        isSuperAdmin: false,
-        joinedClubYear: new Date().getFullYear(),
-        liveTrackingPlatform: 'puretrack',
-        liveTrackingId: '',
-        shareLiveTracking: true
-      });
+    if (!currentUser) {
+      if (onOpenGoogleAuth) {
+        onOpenGoogleAuth();
+      } else {
+        showToast("Connexion Google requise : Veuillez vous connecter avec votre compte Google pour créer une fiche pilote.");
+      }
+      return;
     }
+    setEditingTargetPilot(currentUser);
+    setEditForm({ ...currentUser });
+    setIsEditOpen(true);
+  };
+
+  // Open edit for a specific pilot (Super-Admin or self)
+  const handleOpenEditTargetPilot = (pilot: ClubMemberProfile) => {
+    const isSelf = currentUser?.id === pilot.id;
+    if (!isSuperAdmin && !isSelf) {
+      showToast("Action refusée : Seul le super-administrateur peut modifier la fiche d'un autre membre.");
+      return;
+    }
+    setEditingTargetPilot(pilot);
+    setEditForm({ ...pilot });
     setIsEditOpen(true);
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      showToast("Connexion requise : Veuillez vous connecter avec Google pour enregistrer votre profil.");
+      return;
+    }
     if (!editForm.fullName?.trim()) {
-      showToast("Veuillez renseigner votre nom complet.");
+      showToast("Veuillez renseigner un nom complet.");
       return;
     }
 
-    const email = editForm.googleEmail?.trim() || editForm.email?.trim() || '';
-    const isSuper = isSuperAdminEmail(email);
+    const isSelf = !editingTargetPilot || editingTargetPilot.id === currentUser.id;
+    if (!isSuperAdmin && !isSelf) {
+      showToast("Action refusée : Seul le super-administrateur peut modifier ce profil.");
+      return;
+    }
+
+    const targetId = editingTargetPilot?.id || currentUser.id;
+    const email = editForm.googleEmail?.trim() || editForm.email?.trim() || (isSelf ? (currentUser.googleEmail || currentUser.email) : '');
+    const isTargetSuper = isSuperAdminEmail(email);
 
     const updatedProfile: ClubMemberProfile = {
-      id: editForm.id || `usr-${Date.now()}`,
+      id: targetId,
       fullName: editForm.fullName.trim(),
       email: email,
       googleEmail: email,
       phone: editForm.phone?.trim() || '',
-      role: isSuper ? "Super-Administrateur Club • Les Z’éléphants Volants" : (editForm.role || "Pilote Club"),
+      role: isTargetSuper ? "Super-Administrateur Club • Les Z’éléphants Volants" : (editForm.role || "Pilote Club"),
       pilotLevel: (editForm.pilotLevel as PilotLevel) || 'Brevet de Pilote (Tous sites)',
       wingModel: editForm.wingModel?.trim() || '',
       wingColor: editForm.wingColor?.trim() || '',
       harness: editForm.harness?.trim() || '',
-      sector: editForm.sector?.trim() || 'Chambéry',
+      sector: editForm.sector?.trim() || 'Chambéry & Bassin',
       vehicleInfo: editForm.vehicleInfo?.trim() || '',
       availableSeats: typeof editForm.availableSeats === 'number' ? editForm.availableSeats : 2,
       emergencyContactName: editForm.emergencyContactName?.trim() || '',
       emergencyContactPhone: editForm.emergencyContactPhone?.trim() || '',
-      radioFrequency: editForm.radioFrequency?.trim() || '146.500 MHz',
+      radioFrequency: editForm.radioFrequency?.trim() || '146.500 MHz (Club Zéléph)',
       bio: editForm.bio?.trim() || '',
       avatarUrl: editForm.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
       isGoogleConnected: true,
       isGoogleVerified: true,
-      isSuperAdmin: isSuper,
+      isSuperAdmin: isTargetSuper,
       joinedClubYear: editForm.joinedClubYear || new Date().getFullYear(),
       liveTrackingPlatform: editForm.liveTrackingPlatform || 'puretrack',
       liveTrackingId: editForm.liveTrackingId?.trim() || '',
-      shareLiveTracking: editForm.shareLiveTracking ?? true
+      shareLiveTracking: editForm.shareLiveTracking ?? true,
+      isExample: false
     };
 
     // Save to persistent database
     savePilotProfile(updatedProfile);
 
-    // Notify app state
-    onLogin(updatedProfile);
+    // Notify app state if modifying active self
+    if (isSelf) {
+      onLogin(updatedProfile);
+    }
 
     // Refresh directory from persistent database
     setDirectory(getStoredClubDirectory());
 
     setIsEditOpen(false);
-    showToast("Votre fiche pilote et votre photo ont été enregistrées dans la base de données !");
+    setEditingTargetPilot(null);
+    showToast(`La fiche pilote de "${updatedProfile.fullName}" a été enregistrée avec succès !`);
   };
 
   const filteredDirectory = directory.filter(member => {
@@ -264,13 +298,30 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
               </div>
             ) : null}
 
-            <button
-              onClick={handleOpenEdit}
-              className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs shadow-xl shadow-sky-500/20 transition active:scale-95"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>{currentUser ? 'Modifier ma fiche' : 'Renseigner ma fiche pilote'}</span>
-            </button>
+            {currentUser ? (
+              <button
+                onClick={handleOpenEdit}
+                className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs shadow-xl shadow-sky-500/20 transition active:scale-95 cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Modifier ma fiche</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (onOpenGoogleAuth) {
+                    onOpenGoogleAuth();
+                  } else {
+                    showToast("Connexion Google requise : Veuillez vous connecter avec votre compte Google pour créer une fiche pilote.");
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold text-xs shadow-xl shadow-sky-500/20 transition active:scale-95 cursor-pointer"
+                title="Connexion Google requise pour créer votre fiche pilote officielle"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Se connecter avec Google</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -382,11 +433,17 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
             </div>
           </div>
           <button
-            onClick={handleOpenEdit}
-            className="px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition flex items-center gap-2"
+            onClick={() => {
+              if (onOpenGoogleAuth) {
+                onOpenGoogleAuth();
+              } else {
+                showToast("Connexion Google requise : Veuillez vous connecter avec votre compte Google pour créer votre fiche pilote.");
+              }
+            }}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold text-xs transition flex items-center gap-2 shadow-md shadow-sky-500/20 cursor-pointer"
           >
             <LogIn className="w-4 h-4" />
-            <span>Créer ma fiche avec Google</span>
+            <span>Se connecter avec Google</span>
           </button>
         </div>
       )}
@@ -407,12 +464,12 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            {directory.some(m => m.isExample || ['usr-julien', 'usr-sophie', 'usr-romain', 'usr-claire'].includes(m.id)) && (
+            {isSuperAdmin && directory.some(m => m.isExample || ['usr-julien', 'usr-sophie', 'usr-romain', 'usr-claire'].includes(m.id)) && (
               <button
                 type="button"
                 onClick={() => setShowPurgeExamplesModal(true)}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold transition shrink-0"
-                title="Supprimer tous les profils d'exemple en 1 clic"
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold transition shrink-0 cursor-pointer"
+                title="Action réservée au Super-Administrateur : Supprimer tous les profils d'exemple en 1 clic"
               >
                 <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                 <span>Purger les profils exemples</span>
@@ -477,18 +534,33 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
                       </span>
                     )}
 
-                    {/* Delete Member Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMemberToDelete(pilot);
-                      }}
-                      className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-white/5 hover:border-rose-500/30 transition cursor-pointer"
-                      title={isSelf ? "Supprimer mon profil" : `Supprimer ${pilot.fullName} de l'annuaire`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Card Actions: Strictly restricted to Super-Admin or the member themselves */}
+                    {(isSuperAdmin || isSelf) && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditTargetPilot(pilot);
+                          }}
+                          className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-sky-500/20 text-slate-400 hover:text-sky-300 border border-white/5 hover:border-sky-500/30 transition cursor-pointer"
+                          title={isSelf ? "Modifier ma fiche" : `Modifier la fiche de ${pilot.fullName} (Super-Admin)`}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMemberToDelete(pilot);
+                          }}
+                          className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-white/5 hover:border-rose-500/30 transition cursor-pointer"
+                          title={isSelf ? "Supprimer mon profil" : `Supprimer ${pilot.fullName} de l'annuaire (Super-Admin)`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -640,15 +712,25 @@ export const MembersSpace: React.FC<MembersSpaceProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Email Google / Gmail
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-semibold text-slate-300">
+                        Email Google / Gmail *
+                      </label>
+                      {editForm.isGoogleConnected && (
+                        <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          Vérifié Google
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="email"
+                      required
+                      disabled={Boolean(editForm.isGoogleConnected && !isSuperAdmin)}
                       value={editForm.googleEmail || editForm.email || ''}
                       onChange={e => setEditForm(prev => ({ ...prev, googleEmail: e.target.value, email: e.target.value }))}
                       placeholder="ex: roux.jonath@gmail.com"
-                      className="w-full bg-slate-800/80 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
+                      className={`w-full ${editForm.isGoogleConnected && !isSuperAdmin ? 'bg-slate-900/60 text-slate-300 cursor-not-allowed border-emerald-500/30' : 'bg-slate-800/80 text-white focus:border-sky-500'} border border-white/10 rounded-xl px-3 py-2 text-xs focus:outline-none`}
                     />
                   </div>
 

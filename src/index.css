@@ -38,11 +38,15 @@
 
 /* Main background overrides */
 .theme-light.bg-\[\#020617\],
-.theme-light .bg-\[\#020617\] {
+.theme-light .bg-\[\#020617\],
+.theme-light.bg-slate-50,
+.theme-light .bg-slate-50 {
   background-color: #f8fafc !important;
 }
 
 /* Header, navbars & subheader surfaces */
+.theme-light header,
+.theme-light nav,
 .theme-light .bg-slate-950\/70,
 .theme-light .bg-slate-950\/80,
 .theme-light .bg-slate-950\/90,
@@ -51,46 +55,76 @@
   background-color: rgba(255, 255, 255, 0.95) !important;
 }
 
-/* Card surfaces */
-.theme-light .bg-slate-900,
-.theme-light .bg-slate-900\/40,
-.theme-light .bg-slate-900\/50,
-.theme-light .bg-slate-900\/60,
-.theme-light .bg-slate-900\/70,
-.theme-light .bg-slate-900\/80,
-.theme-light .bg-slate-900\/90 {
+/* Card surfaces: ALL slate-900 & slate-950 variants become clean white or light alpine surfaces */
+.theme-light [class*="bg-slate-900"]:not(.fixed):not([class*="z-50"]):not([class*="inset-0"]),
+.theme-light [class*="bg-slate-950"]:not(.fixed):not([class*="z-50"]):not([class*="inset-0"]) {
   background-color: #ffffff !important;
 }
 
-/* Secondary nested surfaces and badges */
-.theme-light .bg-slate-800,
-.theme-light .bg-slate-800\/40,
-.theme-light .bg-slate-800\/50,
-.theme-light .bg-slate-800\/60,
-.theme-light .bg-slate-800\/80 {
-  background-color: #f1f5f9 !important;
-}
-
-.theme-light .bg-slate-950\/60,
-.theme-light .bg-slate-950\/40 {
+/* Subtle nested sub-boxes and metric panels (40%, 50%, 60% opacity) */
+.theme-light [class*="bg-slate-950/20"],
+.theme-light [class*="bg-slate-950/30"],
+.theme-light [class*="bg-slate-950/40"],
+.theme-light [class*="bg-slate-950/50"],
+.theme-light [class*="bg-slate-950/60"],
+.theme-light [class*="bg-slate-950/70"],
+.theme-light [class*="bg-slate-900/40"],
+.theme-light [class*="bg-slate-900/50"],
+.theme-light [class*="bg-slate-900/60"] {
   background-color: #f8fafc !important;
 }
 
-.theme-light .bg-white\/5,
-.theme-light .bg-white\/10 {
+/* Secondary nested containers, badges, pill buttons, secondary inputs */
+.theme-light [class*="bg-slate-800"]:not(.fixed):not([class*="z-50"]),
+.theme-light [class*="bg-slate-700"]:not(.fixed):not([class*="z-50"]) {
   background-color: #f1f5f9 !important;
 }
 
-/* Light theme subtle borders */
-.theme-light .border-white\/5,
-.theme-light .border-white\/10,
-.theme-light .border-white\/20,
-.theme-light .border-slate-800,
-.theme-light .border-slate-700\/80 {
+.theme-light [class*="bg-slate-800"]:hover:not(.fixed),
+.theme-light [class*="bg-slate-700"]:hover:not(.fixed) {
+  background-color: #e2e8f0 !important;
+}
+
+/* Sub-boxes with white/5 or white/10 in dark mode become subtle slate-100 in light mode */
+.theme-light [class*="bg-white/5"],
+.theme-light [class*="bg-white/10"] {
+  background-color: #f1f5f9 !important;
+}
+
+.theme-light [class*="bg-white/5"]:hover,
+.theme-light [class*="bg-white/10"]:hover {
+  background-color: #e2e8f0 !important;
+}
+
+/* Card gradients in light mode (e.g. from-slate-900/80 to-slate-950/80) */
+.theme-light [class*="from-slate-"],
+.theme-light [class*="to-slate-"],
+.theme-light [class*="via-slate-"] {
+  --tw-gradient-from: #ffffff !important;
+  --tw-gradient-to: #f8fafc !important;
+  --tw-gradient-stops: #ffffff, #f8fafc !important;
+}
+
+.theme-light [class*="bg-gradient-to-"][class*="from-slate-"] {
+  background-image: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+  background-color: #ffffff !important;
+}
+
+/* Light theme borders: replace dark/invisible borders with crisp, subtle alpine dividers */
+.theme-light [class*="border-white/"],
+.theme-light [class*="border-slate-800"],
+.theme-light [class*="border-slate-700"] {
   border-color: #e2e8f0 !important;
 }
 
-/* Typography & Text Contrast */
+/* Light mode modals backdrop: Keep semi-transparent dark overlay so modals pop */
+.theme-light .fixed.inset-0[class*="bg-slate-"],
+.theme-light .fixed[class*="inset-0"][class*="bg-slate-"],
+.theme-light .fixed[class*="backdrop-blur"][class*="bg-slate-"] {
+  background-color: rgba(15, 23, 42, 0.65) !important;
+}
+
+/* Typography & Text Contrast - High legibility on light surfaces */
 .theme-light .text-white {
   color: #0f172a !important;
 }
@@ -102,20 +136,112 @@
 }
 
 .theme-light .text-slate-400 {
-  color: #64748b !important;
+  color: #475569 !important;
 }
 
 .theme-light .text-slate-500 {
-  color: #94a3b8 !important;
+  color: #64748b !important;
 }
 
-/* Form inputs & textareas in light mode */
+.theme-light .text-slate-600 {
+  color: #475569 !important;
+}
+
+/* Badge and Accent Colors contrast tuning for Light Backgrounds */
+.theme-light .text-sky-400 {
+  color: #0284c7 !important;
+}
+.theme-light .text-sky-300 {
+  color: #0369a1 !important;
+}
+
+.theme-light .text-emerald-400 {
+  color: #059669 !important;
+}
+.theme-light .text-emerald-300 {
+  color: #047857 !important;
+}
+
+.theme-light .text-amber-400 {
+  color: #b45309 !important;
+}
+.theme-light .text-amber-300 {
+  color: #92400e !important;
+}
+
+.theme-light .text-rose-400 {
+  color: #e11d48 !important;
+}
+.theme-light .text-rose-300 {
+  color: #be123c !important;
+}
+
+/* Soft pastel backgrounds for category tags in light mode */
+.theme-light .bg-sky-500\/10,
+.theme-light .bg-sky-500\/15,
+.theme-light .bg-sky-500\/20 {
+  background-color: rgba(14, 165, 233, 0.12) !important;
+  border-color: rgba(14, 165, 233, 0.25) !important;
+}
+
+.theme-light .bg-emerald-500\/10,
+.theme-light .bg-emerald-500\/15,
+.theme-light .bg-emerald-400\/10,
+.theme-light .bg-emerald-400\/20 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  border-color: rgba(16, 185, 129, 0.25) !important;
+}
+
+.theme-light .bg-amber-500\/10,
+.theme-light .bg-amber-500\/15,
+.theme-light .bg-amber-400\/10 {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+  border-color: rgba(245, 158, 11, 0.28) !important;
+}
+
+.theme-light .bg-rose-500\/10,
+.theme-light .bg-rose-500\/15,
+.theme-light .bg-rose-400\/10 {
+  background-color: rgba(244, 63, 94, 0.12) !important;
+  border-color: rgba(244, 63, 94, 0.25) !important;
+}
+
+/* Keep accent button texts legible with high contrast */
+.theme-light .bg-sky-500,
+.theme-light .bg-sky-400 {
+  color: #020617 !important;
+}
+.theme-light .bg-sky-500 *,
+.theme-light .bg-sky-400 * {
+  color: #020617 !important;
+}
+
+/* Colored buttons with white text MUST keep white text */
+.theme-light .bg-gradient-to-r.from-sky-500.to-indigo-600,
+.theme-light .bg-gradient-to-r.from-sky-500.to-indigo-600 *,
+.theme-light .bg-rose-500,
+.theme-light .bg-rose-500 *,
+.theme-light .bg-rose-600,
+.theme-light .bg-rose-600 *,
+.theme-light .bg-emerald-600,
+.theme-light .bg-emerald-600 * {
+  color: #ffffff !important;
+}
+
+/* Form inputs, textareas & selects in light mode */
 .theme-light input:not([type="checkbox"]):not([type="radio"]),
 .theme-light textarea,
 .theme-light select {
   background-color: #ffffff !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
+}
+
+.theme-light input:not([type="checkbox"]):not([type="radio"]):focus,
+.theme-light textarea:focus,
+.theme-light select:focus {
+  border-color: #0284c7 !important;
+  box-shadow: 0 0 0 1px #0284c7 !important;
 }
 
 .theme-light input::placeholder,
@@ -131,29 +257,9 @@
   box-shadow: 0 6px 20px -6px rgba(15, 23, 42, 0.07) !important;
 }
 
-/* Light mode modals backdrop */
-.theme-light .bg-slate-950\/80 {
-  background-color: rgba(15, 23, 42, 0.5) !important;
-}
-
 /* Light mode ambient background */
 .theme-light .bg-dot-grid {
   background-image: radial-gradient(rgba(148, 163, 184, 0.3) 1px, transparent 1px) !important;
-}
-
-/* Keep accent button texts legible */
-.theme-light .bg-sky-500 .text-slate-950,
-.theme-light .bg-sky-400 .text-slate-950,
-.theme-light .bg-emerald-500 .text-slate-950,
-.theme-light .bg-amber-400 .text-slate-950 {
-  color: #020617 !important;
-}
-
-.theme-light .bg-gradient-to-r.from-sky-500.to-indigo-600,
-.theme-light .bg-sky-500,
-.theme-light .bg-emerald-600,
-.theme-light .bg-rose-600 {
-  color: #ffffff !important;
 }
 
 /* Light mode scrollbar */

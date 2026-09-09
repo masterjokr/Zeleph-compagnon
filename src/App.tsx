@@ -11,7 +11,8 @@ import { ClubOutingsCalendar } from './components/ClubOutingsCalendar';
 import { OfflineBadge } from './components/OfflineBadge';
 import { WelcomeAccessModal } from './components/WelcomeAccessModal';
 import { AdminGoogleAuthModal } from './components/AdminGoogleAuthModal';
-import { ClubMemberProfile, AppTheme } from './types';
+import { DiscordIntegrationModal } from './components/DiscordIntegrationModal';
+import { ClubMemberProfile, AppTheme, ShuttleRide, ClubOuting } from './types';
 import { Radio, ExternalLink, Globe, Sparkles, CheckCircle2, Crown, Compass } from 'lucide-react';
 import { 
   isSuperAdminEmail, 
@@ -26,6 +27,7 @@ import {
   getStoredTheme,
   saveStoredTheme
 } from './utils/storageService';
+import { initDiscordBotAutoSync } from './utils/botSyncService';
 
 const WELCOME_DISMISSED_KEY = 'zeleph_welcome_dismissed_v1';
 
@@ -45,6 +47,46 @@ export default function App() {
 
   // Super-admin dedicated modal state
   const [isAdminGoogleModalOpen, setIsAdminGoogleModalOpen] = useState<boolean>(false);
+
+  // Discord Gateway Integration modal state
+  const [isDiscordModalOpen, setIsDiscordModalOpen] = useState<boolean>(false);
+
+  // Deep-link query parameters from Discord buttons/links (?join_ride=... or ?join_outing=...)
+  const [highlightedRideId, setHighlightedRideId] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('join_ride');
+    } catch {
+      return null;
+    }
+  });
+
+  const [highlightedOutingId, setHighlightedOutingId] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('join_outing');
+    } catch {
+      return null;
+    }
+  });
+
+  // Automatically switch tabs if deep-linked
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const rideId = params.get('join_ride');
+      const outingId = params.get('join_outing');
+      if (rideId) {
+        setActiveTab('navettes');
+        setHighlightedRideId(rideId);
+      } else if (outingId) {
+        setActiveTab('calendrier');
+        setHighlightedOutingId(outingId);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
 
   // Current logged in user loaded from storage
   const [currentUser, setCurrentUser] = useState<ClubMemberProfile | null>(() => {
@@ -104,6 +146,30 @@ export default function App() {
     showToast("Vous êtes maintenant déconnecté. L'application est en mode visiteur.");
   };
 
+  const handleSimulateIncomingShuttle = (ride: ShuttleRide) => {
+    try {
+      const raw = localStorage.getItem('zeleph_shuttle_rides_v1');
+      const existing = raw ? JSON.parse(raw) : [];
+      localStorage.setItem('zeleph_shuttle_rides_v1', JSON.stringify([ride, ...existing]));
+    } catch (e) {
+      console.error(e);
+    }
+    setActiveTab('navettes');
+    showToast("🚗 Covoiturage reçu de Discord synchronisé dans l'application !");
+  };
+
+  const handleSimulateIncomingOuting = (outing: ClubOuting) => {
+    try {
+      const raw = localStorage.getItem('zeleph_club_outings_v1');
+      const existing = raw ? JSON.parse(raw) : [];
+      localStorage.setItem('zeleph_club_outings_v1', JSON.stringify([outing, ...existing]));
+    } catch (e) {
+      console.error(e);
+    }
+    setActiveTab('calendrier');
+    showToast("📅 Sortie club reçue de Discord synchronisée dans l'application !");
+  };
+
   const [currentTime, setCurrentTime] = useState<string>(() => {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -114,7 +180,14 @@ export default function App() {
       const now = new Date();
       setCurrentTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
     }, 10000);
-    return () => clearInterval(timer);
+
+    // Initialise la synchronisation automatique en arrière-plan depuis le Bot Render
+    const stopBotSync = initDiscordBotAutoSync(20000);
+
+    return () => {
+      clearInterval(timer);
+      stopBotSync();
+    };
   }, []);
 
   return (
@@ -154,6 +227,7 @@ export default function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenWelcomeModal={() => handleOpenWelcome()}
+        onOpenDiscordModal={() => setIsDiscordModalOpen(true)}
         theme={theme}
         onToggleTheme={handleToggleTheme}
       />
@@ -271,6 +345,9 @@ export default function App() {
               handleOpenWelcome("Pour vous inscrire ou proposer une sortie club, connectez-vous avec votre compte Google.");
             }}
             onRequireMemberAuth={(reason) => handleOpenWelcome(reason)}
+            onOpenDiscordModal={() => setIsDiscordModalOpen(true)}
+            highlightedOutingId={highlightedOutingId}
+            onClearHighlightedOuting={() => setHighlightedOutingId(null)}
           />
         )}
 
@@ -281,6 +358,9 @@ export default function App() {
               handleOpenWelcome("Pour proposer un covoiturage ou réserver une place de navette, connectez-vous avec votre compte Google.");
             }}
             onRequireMemberAuth={(reason) => handleOpenWelcome(reason)}
+            onOpenDiscordModal={() => setIsDiscordModalOpen(true)}
+            highlightedRideId={highlightedRideId}
+            onClearHighlightedRide={() => setHighlightedRideId(null)}
           />
         )}
 
@@ -344,6 +424,15 @@ export default function App() {
           setIsAdminGoogleModalOpen(false);
         }}
         onLogoutSuperAdmin={handleLogout}
+      />
+
+      {/* Discord Webhook & Gateway Integration Modal */}
+      <DiscordIntegrationModal
+        isOpen={isDiscordModalOpen}
+        onClose={() => setIsDiscordModalOpen(false)}
+        currentUser={currentUser}
+        onSimulateIncomingShuttle={handleSimulateIncomingShuttle}
+        onSimulateIncomingOuting={handleSimulateIncomingOuting}
       />
 
       {/* Footer */}

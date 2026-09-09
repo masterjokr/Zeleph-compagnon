@@ -14,7 +14,8 @@ import {
   Crown,
   LogIn,
   Sun,
-  Moon
+  Moon,
+  MessageSquare
 } from 'lucide-react';
 import { ClubMemberProfile, AppTheme } from '../types';
 import { isZelephMember } from '../utils/authUtils';
@@ -26,6 +27,7 @@ interface NavbarProps {
   currentUser?: ClubMemberProfile | null;
   onLogout?: () => void;
   onOpenWelcomeModal?: () => void;
+  onOpenDiscordModal?: () => void;
   theme?: AppTheme;
   onToggleTheme?: () => void;
 }
@@ -36,6 +38,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser, 
   onLogout,
   onOpenWelcomeModal,
+  onOpenDiscordModal,
   theme = 'dark',
   onToggleTheme
 }) => {
@@ -168,6 +171,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span>Connexion Google</span>
                 </button>
               </div>
+            )}
+
+            {/* Discord Gateway button */}
+            {onOpenDiscordModal && (
+              <button
+                type="button"
+                onClick={onOpenDiscordModal}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#5865F2]/20 hover:bg-[#5865F2]/30 border border-[#5865F2]/40 text-[#5865F2] hover:text-white transition cursor-pointer shadow-sm"
+                title="Passerelle Discord (Covoiturages & Sorties Club)"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-semibold hidden md:inline">Discord</span>
+              </button>
             )}
 
             {/* Theme Switcher Button (Sombre / Clair) */}

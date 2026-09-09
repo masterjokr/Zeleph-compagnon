@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ClubOuting, OutingCategory, ClubMemberProfile, OutingParticipant } from '../types';
 import { INITIAL_OUTINGS } from '../data/outingsData';
 import { ZELEPH_SITES } from '../data/sitesData';
+import { fetchLiveDiscordSync } from '../utils/botSyncService';
 import { 
   CalendarDays, 
   Plus, 
@@ -24,9 +25,16 @@ import {
   Info,
   Trash2,
   ShieldCheck,
-  Lock
+  Lock,
+  MessageSquare,
+  RefreshCw
 } from 'lucide-react';
 import { isZelephMember } from '../utils/authUtils';
+import { 
+  sendOutingToDiscord, 
+  syncOutingWithDiscord, 
+  getStoredDiscordConfig 
+} from '../utils/discordWebhook';
 
 const STORAGE_OUTINGS_KEY = 'zeleph_club_outings_v1';
 const STORAGE_PROFILE_KEY = 'zeleph_member_profile_v1';
@@ -87,13 +95,19 @@ interface ClubOutingsCalendarProps {
   currentUser?: ClubMemberProfile | null;
   onRequireLogin?: () => void;
   onRequireMemberAuth?: (reason: string) => void;
+  onOpenDiscordModal?: () => void;
+  highlightedOutingId?: string | null;
+  onClearHighlightedOuting?: () => void;
 }
 
 export const ClubOutingsCalendar: React.FC<ClubOutingsCalendarProps> = ({ 
   onNavigateToSite,
   currentUser: propCurrentUser,
   onRequireLogin,
-  onRequireMemberAuth
+  onRequireMemberAuth,
+  onOpenDiscordModal,
+  highlightedOutingId,
+  onClearHighlightedOuting
 }) => {
   // If prop passed, use it; otherwise read safely from localStorage (null if not saved)
   const [localUser] = useState<ClubMemberProfile | null>(() => {
@@ -149,10 +163,63 @@ export const ClubOutingsCalendar: React.FC<ClubOutingsCalendarProps> = ({
     onConfirm: () => void;
   } | null>(null);
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
+  const [syncingOutingId, setSyncingOutingId] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setNotificationToast(msg);
-    setTimeout(() => setNotificationToast(null), 4000);
+    setTimeout(() => setNotificationToast(null), 4500);
+  };
+
+  // Deep-link from Discord (?join_outing=...)
+  useEffect(() => {
+    if (highlightedOutingId) {
+      const target = outings.find(o => o.id === highlightedOutingId);
+      if (target) {
+        setSelectedOutingDetail(target);
+      }
+    }
+  }, [highlightedOutingId, outings]);
+
+  // Écoute les synchronisations en direct sorties venues du Bot Render
+  useEffect(() => {
+    const handleUpdate = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setOutings(e.detail);
+      } else {
+        try {
+          const saved = localStorage.getItem(STORAGE_OUTINGS_KEY);
+          if (saved) setOutings(JSON.parse(saved));
+        } catch {}
+      }
+    };
+    window.addEventListener('zeleph_outings_updated', handleUpdate);
+    return () => window.removeEventListener('zeleph_outings_updated', handleUpdate);
+  }, []);
+
+  const [isSyncingFromBot, setIsSyncingFromBot] = useState(false);
+  const handleSyncWithBot = async () => {
+    const discordCfg = getStoredDiscordConfig();
+    if (!discordCfg.botApiUrl) {
+      showToast("ℹ️ Veuillez renseigner l'URL de votre Bot Render dans la passerelle Discord.");
+      if (onOpenDiscordModal) {
+        onOpenDiscordModal();
+      }
+      return;
+    }
+
+    setIsSyncingFromBot(true);
+    try {
+      const res = await fetchLiveDiscordSync();
+      if (res.success) {
+        showToast(`🔄 Bot synchronisé : ${res.sortiesCount} sortie(s) à jour.`);
+      } else {
+        showToast(`ℹ️ ${res.message}`);
+      }
+    } catch (e: any) {
+      showToast(`Erreur synchro : ${e?.message}`);
+    } finally {
+      setIsSyncingFromBot(false);
+    }
   };
 
   // New Outing Form
@@ -244,9 +311,41 @@ export const ClubOutingsCalendar: React.FC<ClubOutingsCalendarProps> = ({
     setNewTitle('');
     setNewDescription('');
     setNewCustomSiteName('');
+
+    // Auto-sync with Discord if configured
+    const discordCfg = getStoredDiscordConfig();
+    if ((discordCfg.botApiUrl || discordCfg.outingWebhookUrl || discordCfg.shuttleWebhookUrl) && discordCfg.autoSyncOutings) {
+      setSyncingOutingId(created.id);
+      sendOutingToDiscord(created).then(res => {
+        if (res.ok) {
+          if (res.messageId) {
+            setOutings(prev => prev.map(o => o.id === created.id ? {
+              ...o,
+              discordMessageId: res.messageId,
+              discordChannelId: res.channelId || o.discordChannelId,
+              discordWebhookUrl: res.webhookUrlUsed,
+              discordLastSyncedAt: new Date().toISOString()
+            } : o));
+          }
+          if (res.botUsed) {
+            showToast("🎉 Sortie publiée sur Discord avec boutons [Je participe] directs !");
+          } else {
+            showToast("🦅 Sortie publiée et synchronisée sur Discord !");
+          }
+        } else {
+          showToast(`Alerte Discord : ${res.error || 'Erreur d\'envoi'}`);
+        }
+      }).catch(err => {
+        console.error('Erreur synchronisation Discord sortie:', err);
+      }).finally(() => {
+        setSyncingOutingId(null);
+      });
+    } else {
+      showToast("Sortie enregistrée sur le calendrier du club !");
+    }
   };
 
-  // Join or Leave Outing
+  // Join or Leave Outing with live Discord PATCH sync (no duplicates)
   const handleToggleJoin = (outingId: string) => {
     if (!isZelephMember(currentUser)) {
       if (onRequireMemberAuth) {
@@ -259,16 +358,21 @@ export const ClubOutingsCalendar: React.FC<ClubOutingsCalendarProps> = ({
       return;
     }
 
+    let updatedOuting: ClubOuting | null = null;
+
     setOutings(prev => prev.map(out => {
       if (out.id !== outingId) return out;
       const isAlreadyIn = out.participants.some(p => p.id === currentUser.id);
 
       if (isAlreadyIn) {
         // Leave
-        return {
+        const next: ClubOuting = {
           ...out,
-          participants: out.participants.filter(p => p.id !== currentUser.id)
+          participants: out.participants.filter(p => p.id !== currentUser.id),
+          discordLastSyncedAt: new Date().toISOString()
         };
+        updatedOuting = next;
+        return next;
       } else {
         // Join
         if (out.participants.length >= out.maxParticipants) {
@@ -286,28 +390,100 @@ export const ClubOutingsCalendar: React.FC<ClubOutingsCalendarProps> = ({
           status: 'confirmed',
           joinedAt: new Date().toISOString()
         };
-        return {
+        const next: ClubOuting = {
           ...out,
-          participants: [...out.participants, newPart]
+          participants: [...out.participants, newPart],
+          discordLastSyncedAt: new Date().toISOString()
         };
+        updatedOuting = next;
+        return next;
       }
     }));
+
+    if (updatedOuting) {
+      const isLeaving = (updatedOuting as ClubOuting).participants.every(p => p.id !== currentUser.id);
+      // In-place Discord sync (PATCH message without duplicate!)
+      const discordCfg = getStoredDiscordConfig();
+      if ((discordCfg.botApiUrl || discordCfg.outingWebhookUrl || discordCfg.shuttleWebhookUrl) && discordCfg.autoSyncOutings) {
+        setSyncingOutingId(outingId);
+        syncOutingWithDiscord(updatedOuting).then(syncRes => {
+          if (syncRes.ok) {
+            if (syncRes.messageId) {
+              setOutings(prev => prev.map(o => o.id === outingId ? { 
+                ...o, 
+                discordMessageId: syncRes.messageId,
+                discordChannelId: syncRes.channelId || o.discordChannelId 
+              } : o));
+            }
+            if (syncRes.isPatched) {
+              showToast(isLeaving 
+                ? "Désinscription prise en compte et message Discord actualisé en direct !" 
+                : "🎉 Inscription confirmée ! Le message Discord a été mis à jour en direct (sans doublon).");
+            } else {
+              showToast("Inscription confirmée et synchronisée sur Discord !");
+            }
+          }
+        }).catch(console.error).finally(() => {
+          setSyncingOutingId(null);
+        });
+      } else {
+        showToast(isLeaving ? "Désinscription enregistrée." : "🎉 Inscription à la sortie confirmée !");
+      }
+    }
   };
 
   // Organizer: Confirm/remove participant
   const handleRemoveParticipant = (outingId: string, participantId: string) => {
+    let updatedTarget: ClubOuting | null = null;
     setOutings(prev => prev.map(out => {
       if (out.id !== outingId) return out;
-      return {
+      const next: ClubOuting = {
         ...out,
-        participants: out.participants.filter(p => p.id !== participantId)
+        participants: out.participants.filter(p => p.id !== participantId),
+        discordLastSyncedAt: new Date().toISOString()
       };
+      updatedTarget = next;
+      return next;
     }));
+
     if (managingOuting && managingOuting.id === outingId) {
       setManagingOuting(prev => prev ? {
         ...prev,
         participants: prev.participants.filter(p => p.id !== participantId)
       } : null);
+    }
+
+    if (updatedTarget) {
+      const discordCfg = getStoredDiscordConfig();
+      if ((discordCfg.botApiUrl || discordCfg.outingWebhookUrl || discordCfg.shuttleWebhookUrl) && discordCfg.autoSyncOutings) {
+        syncOutingWithDiscord(updatedTarget).catch(console.error);
+      }
+    }
+  };
+
+  const handleManualSyncOuting = async (outing: ClubOuting) => {
+    setSyncingOutingId(outing.id);
+    try {
+      const res = await syncOutingWithDiscord(outing);
+      if (res.ok) {
+        if (res.messageId) {
+          setOutings(prev => prev.map(o => o.id === outing.id ? {
+            ...o,
+            discordMessageId: res.messageId,
+            discordChannelId: res.channelId || o.discordChannelId,
+            discordLastSyncedAt: new Date().toISOString()
+          } : o));
+        }
+        showToast(res.isPatched 
+          ? "✅ Message Discord mis à jour en direct (sans doublon) !" 
+          : "✅ Sortie synchronisée sur Discord avec succès !");
+      } else {
+        showToast(`Erreur Discord : ${res.error || 'Vérifiez la connexion Discord'}`);
+      }
+    } catch (err) {
+      showToast("Impossible de synchroniser avec Discord.");
+    } finally {
+      setSyncingOutingId(null);
     }
   };
 
@@ -504,6 +680,27 @@ export const ClubOutingsCalendar: React.FC<ClubOutingsCalendarProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleSyncWithBot}
+              disabled={isSyncingFromBot}
+              className="flex items-center gap-1.5 px-3.5 py-3 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 font-bold text-xs transition active:scale-95 shadow-lg shadow-emerald-500/10"
+              title="Synchroniser immédiatement le calendrier des sorties avec le Bot Discord (Render)"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSyncingFromBot ? 'animate-spin' : ''}`} />
+              <span>{isSyncingFromBot ? 'Synchro...' : 'Synchro Bot'}</span>
+            </button>
+
+            {onOpenDiscordModal && (
+              <button
+                onClick={onOpenDiscordModal}
+                className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-[#5865F2]/15 hover:bg-[#5865F2]/25 text-[#5865F2] hover:text-white border border-[#5865F2]/30 font-bold text-xs transition active:scale-95 shadow-lg shadow-[#5865F2]/10"
+                title="Configurer la passerelle Discord et synchroniser les sorties"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>Passerelle Discord</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 if (!isZelephMember(currentUser)) {
@@ -1105,6 +1302,28 @@ export const ClubOutingsCalendar: React.FC<ClubOutingsCalendarProps> = ({
                     {outing.organizerPhone && (
                       <span className="font-mono text-slate-400 hidden sm:inline">• {outing.organizerPhone}</span>
                     )}
+                  </div>
+
+                  {/* Discord Sync Indicator */}
+                  <div className="flex items-center gap-2 pt-0.5 text-xs">
+                    {outing.discordMessageId ? (
+                      <span className="flex items-center gap-1.5 text-emerald-400 font-medium text-[11px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Synchronisé Discord
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 text-[11px]">Non synchronisé</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleManualSyncOuting(outing)}
+                      disabled={syncingOutingId === outing.id}
+                      className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition flex items-center gap-1 text-[10px] font-mono"
+                      title="Mettre à jour le message Discord existant sans doublon"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${syncingOutingId === outing.id ? 'animate-spin text-sky-400' : ''}`} />
+                      <span>{outing.discordMessageId ? 'Sync Discord' : 'Publier'}</span>
+                    </button>
                   </div>
                 </div>
 

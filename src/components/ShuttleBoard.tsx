@@ -1,8 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { ShuttleRide, ClubMemberProfile } from '../types';
 import { ZELEPH_SITES } from '../data/sitesData';
-import { Car, Plus, Users, Clock, MapPin, Check, MessageSquare, PhoneCall, Trash2, UserCheck, Sparkles, User, Lock } from 'lucide-react';
+import { 
+  Car, Plus, Users, Clock, MapPin, Check, MessageSquare, PhoneCall, 
+  Trash2, UserCheck, Sparkles, User, Lock, RefreshCw, X, AlertCircle, ExternalLink 
+} from 'lucide-react';
 import { isZelephMember } from '../utils/authUtils';
+import { 
+  sendShuttleToDiscord, 
+  syncShuttleWithDiscord, 
+  getStoredDiscordConfig 
+} from '../utils/discordWebhook';
+import { fetchLiveDiscordSync } from '../utils/botSyncService';
 
 const STORAGE_KEY = 'zeleph_shuttle_rides_v1';
 const STORAGE_PROFILE_KEY = 'zeleph_member_profile_v1';
@@ -11,6 +20,9 @@ export interface ShuttleBoardProps {
   currentUser?: ClubMemberProfile | null;
   onNavigateToMembers?: () => void;
   onRequireMemberAuth?: (reason: string) => void;
+  onOpenDiscordModal?: () => void;
+  highlightedRideId?: string | null;
+  onClearHighlightedRide?: () => void;
 }
 
 const INITIAL_RIDES: ShuttleRide[] = [
@@ -63,7 +75,10 @@ const INITIAL_RIDES: ShuttleRide[] = [
 export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({ 
   currentUser: propCurrentUser, 
   onNavigateToMembers,
-  onRequireMemberAuth 
+  onRequireMemberAuth,
+  onOpenDiscordModal,
+  highlightedRideId,
+  onClearHighlightedRide
 }) => {
   // If prop provided, use it; otherwise fallback to checking localStorage safely (null if absent)
   const [localUser] = useState<ClubMemberProfile | null>(() => {
@@ -102,6 +117,17 @@ export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({
   const [comment, setComment] = useState('');
   const [rideToDelete, setRideToDelete] = useState<ShuttleRide | null>(null);
 
+  // In-app Join Modal & Discord synchronization states
+  const [joinModalRide, setJoinModalRide] = useState<ShuttleRide | null>(null);
+  const [joinPilotName, setJoinPilotName] = useState<string>('');
+  const [syncingRideId, setSyncingRideId] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 4500);
+  };
+
   // When modal opens, check member permissions and sync with current user profile
   const handleOpenModal = () => {
     if (!isZelephMember(currentUser)) {
@@ -129,6 +155,58 @@ export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({
       // ignore
     }
   }, [rides]);
+
+  // Écoute les synchronisations en direct venues du Bot Render
+  useEffect(() => {
+    const handleUpdate = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setRides(e.detail);
+      } else {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) setRides(JSON.parse(saved));
+        } catch {}
+      }
+    };
+    window.addEventListener('zeleph_rides_updated', handleUpdate);
+    return () => window.removeEventListener('zeleph_rides_updated', handleUpdate);
+  }, []);
+
+  const [isSyncingFromBot, setIsSyncingFromBot] = useState(false);
+  const handleSyncWithBot = async () => {
+    const discordCfg = getStoredDiscordConfig();
+    if (!discordCfg.botApiUrl) {
+      showToast("ℹ️ Veuillez renseigner l'URL de votre Bot Render dans la passerelle Discord.");
+      if (onOpenDiscordModal) {
+        onOpenDiscordModal();
+      }
+      return;
+    }
+
+    setIsSyncingFromBot(true);
+    try {
+      const res = await fetchLiveDiscordSync();
+      if (res.success) {
+        showToast(`🔄 Bot synchronisé : ${res.covoitsCount} covoiturage(s) à jour.`);
+      } else {
+        showToast(`ℹ️ ${res.message}`);
+      }
+    } catch (e: any) {
+      showToast(`Erreur synchro : ${e?.message}`);
+    } finally {
+      setIsSyncingFromBot(false);
+    }
+  };
+
+  // Handle deep-link from Discord (?join_ride=...)
+  useEffect(() => {
+    if (highlightedRideId) {
+      const target = rides.find(r => r.id === highlightedRideId);
+      if (target) {
+        handleOpenJoinModal(target);
+      }
+    }
+  }, [highlightedRideId, rides]);
 
   const handleCreateRide = (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,32 +240,159 @@ export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({
     setShowModal(false);
     setComment('');
     setCustomSiteName('');
+
+    // Auto-sync with Discord if configured
+    const discordCfg = getStoredDiscordConfig();
+    if ((discordCfg.botApiUrl || discordCfg.shuttleWebhookUrl) && discordCfg.autoSyncShuttles) {
+      setSyncingRideId(newRide.id);
+      sendShuttleToDiscord(newRide).then(res => {
+        if (res.ok) {
+          if (res.messageId) {
+            setRides(prev => prev.map(r => r.id === newRide.id ? {
+              ...r,
+              discordMessageId: res.messageId,
+              discordChannelId: res.channelId || r.discordChannelId,
+              discordWebhookUrl: res.webhookUrlUsed,
+              discordLastSyncedAt: new Date().toISOString()
+            } : r));
+          }
+          if (res.botUsed) {
+            showToast("🎉 Covoiturage publié sur Discord avec boutons [Je monte] directs !");
+          } else {
+            showToast("🚗 Covoiturage publié et synchronisé sur Discord !");
+          }
+        } else {
+          showToast(`Alerte Discord : ${res.error || 'Erreur d\'envoi'}`);
+        }
+      }).catch(err => {
+        console.error('Erreur synchronisation Discord navette:', err);
+      }).finally(() => {
+        setSyncingRideId(null);
+      });
+    } else {
+      showToast("Covoiturage publié sur l'application !");
+    }
   };
 
-  const handleJoinRide = (rideId: string) => {
-    if (!isZelephMember(currentUser)) {
-      if (onRequireMemberAuth) {
-        onRequireMemberAuth("Pour réserver une place dans un covoiturage, connectez-vous avec votre compte Discord (statut minimum : Membre Z'éléph).");
-      } else if (onNavigateToMembers) {
-        onNavigateToMembers();
-      }
+  const handleOpenJoinModal = (ride: ShuttleRide) => {
+    if (ride.availableSeats <= 0) {
+      showToast("Cette navette est déjà complète (0 place disponible) !");
+      return;
+    }
+    const defaultName = currentUser ? (currentUser.fullName || currentUser.discordUsername || '') : '';
+    setJoinPilotName(defaultName);
+    setJoinModalRide(ride);
+  };
+
+  const handleConfirmJoin = async () => {
+    if (!joinModalRide) return;
+    const name = joinPilotName.trim();
+    if (!name) {
+      showToast("Veuillez saisir votre prénom ou pseudo pilote.");
       return;
     }
 
-    const defaultName = currentUser ? (currentUser.fullName || currentUser.discordUsername) : '';
-    const pilotName = window.prompt(`Confirmer votre place dans la navette sous le nom de :`, defaultName);
-    if (!pilotName || !pilotName.trim()) return;
+    if (joinModalRide.availableSeats <= 0) {
+      showToast("Désolé, cette navette est déjà complète !");
+      setJoinModalRide(null);
+      return;
+    }
 
-    setRides(prev => prev.map(r => {
-      if (r.id === rideId && r.availableSeats > 0) {
-        return {
-          ...r,
-          availableSeats: r.availableSeats - 1,
-          passengers: [...r.passengers, pilotName.trim()]
-        };
+    const updatedRide: ShuttleRide = {
+      ...joinModalRide,
+      availableSeats: joinModalRide.availableSeats - 1,
+      passengers: [...joinModalRide.passengers, name],
+      discordLastSyncedAt: new Date().toISOString()
+    };
+
+    // Update state & storage
+    setRides(prev => prev.map(r => r.id === updatedRide.id ? updatedRide : r));
+    setJoinModalRide(null);
+    if (onClearHighlightedRide) onClearHighlightedRide();
+
+    // In-place Discord sync (PATCH message without duplicate!)
+    const discordCfg = getStoredDiscordConfig();
+    if ((discordCfg.botApiUrl || discordCfg.shuttleWebhookUrl) && discordCfg.autoSyncShuttles) {
+      setSyncingRideId(updatedRide.id);
+      try {
+        const syncRes = await syncShuttleWithDiscord(updatedRide);
+        if (syncRes.ok) {
+          if (syncRes.messageId) {
+            setRides(prev => prev.map(r => r.id === updatedRide.id ? { 
+              ...r, 
+              discordMessageId: syncRes.messageId,
+              discordChannelId: syncRes.channelId || r.discordChannelId 
+            } : r));
+          }
+          if (syncRes.isPatched) {
+            showToast(`✅ ${name} inscrit ! Message Discord mis à jour en direct (sans doublon).`);
+          } else {
+            showToast(`✅ ${name} inscrit et synchronisé sur Discord !`);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setSyncingRideId(null);
       }
-      return r;
-    }));
+    } else {
+      showToast(`✅ ${name} inscrit avec succès dans la navette !`);
+    }
+  };
+
+  const handleLeaveRide = async (ride: ShuttleRide, passengerName: string) => {
+    const updatedRide: ShuttleRide = {
+      ...ride,
+      availableSeats: Math.min(ride.totalSeats, ride.availableSeats + 1),
+      passengers: ride.passengers.filter(p => p !== passengerName),
+      discordLastSyncedAt: new Date().toISOString()
+    };
+
+    setRides(prev => prev.map(r => r.id === updatedRide.id ? updatedRide : r));
+
+    // In-place Discord sync (PATCH)
+    const discordCfg = getStoredDiscordConfig();
+    if ((discordCfg.botApiUrl || discordCfg.shuttleWebhookUrl) && discordCfg.autoSyncShuttles) {
+      setSyncingRideId(updatedRide.id);
+      try {
+        const syncRes = await syncShuttleWithDiscord(updatedRide);
+        if (syncRes.ok) {
+          showToast(`Place de ${passengerName} libérée. Message Discord actualisé en direct !`);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setSyncingRideId(null);
+      }
+    } else {
+      showToast(`Place de ${passengerName} libérée.`);
+    }
+  };
+
+  const handleManualSync = async (ride: ShuttleRide) => {
+    setSyncingRideId(ride.id);
+    try {
+      const res = await syncShuttleWithDiscord(ride);
+      if (res.ok) {
+        if (res.messageId) {
+          setRides(prev => prev.map(r => r.id === ride.id ? { 
+            ...r, 
+            discordMessageId: res.messageId,
+            discordChannelId: res.channelId || r.discordChannelId,
+            discordLastSyncedAt: new Date().toISOString() 
+          } : r));
+        }
+        showToast(res.isPatched 
+          ? "✅ Message Discord mis à jour en direct (sans doublon) !" 
+          : "✅ Covoiturage synchronisé sur Discord avec succès !");
+      } else {
+        showToast(`Erreur Discord : ${res.error || 'Vérifiez la connexion Discord'}`);
+      }
+    } catch (err) {
+      showToast("Impossible de synchroniser avec Discord.");
+    } finally {
+      setSyncingRideId(null);
+    }
   };
 
   const handleDeleteRide = (ride: ShuttleRide) => {
@@ -225,18 +430,41 @@ export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleOpenModal}
-          className={`relative z-10 flex items-center justify-center gap-2 px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm shadow-xl transition-all active:scale-95 ${
-            isZelephMember(currentUser)
-              ? 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/20'
-              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 shadow-slate-900/50'
-          }`}
-          title={isZelephMember(currentUser) ? "Proposer une navette / un covoiturage" : "Mode Visiteur : connectez-vous avec Discord (statut Membre Z'éléph requis)"}
-        >
-          {isZelephMember(currentUser) ? <Plus className="w-4 h-4" /> : <Lock className="w-4 h-4 text-amber-400" />}
-          <span>{isZelephMember(currentUser) ? 'Proposer une montée' : 'Connexion requise pour proposer'}</span>
-        </button>
+        <div className="relative z-10 flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleSyncWithBot}
+            disabled={isSyncingFromBot}
+            className="flex items-center gap-1.5 px-3.5 py-3 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 font-bold text-xs sm:text-sm transition active:scale-95 shadow-lg shadow-emerald-500/10"
+            title="Synchroniser immédiatement les covoiturages avec le Bot Discord (Render)"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncingFromBot ? 'animate-spin' : ''}`} />
+            <span>{isSyncingFromBot ? 'Synchro...' : 'Synchro Bot'}</span>
+          </button>
+
+          {onOpenDiscordModal && (
+            <button
+              onClick={onOpenDiscordModal}
+              className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-[#5865F2]/15 hover:bg-[#5865F2]/25 text-[#5865F2] hover:text-white border border-[#5865F2]/30 font-bold text-xs sm:text-sm transition active:scale-95 shadow-lg shadow-[#5865F2]/10"
+              title="Configurer la passerelle Discord et synchroniser les covoiturages"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Passerelle Discord</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleOpenModal}
+            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm shadow-xl transition-all active:scale-95 ${
+              isZelephMember(currentUser)
+                ? 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/20'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 shadow-slate-900/50'
+            }`}
+            title={isZelephMember(currentUser) ? "Proposer une navette / un covoiturage" : "Mode Visiteur : connectez-vous avec Discord (statut Membre Z'éléph requis)"}
+          >
+            {isZelephMember(currentUser) ? <Plus className="w-4 h-4" /> : <Lock className="w-4 h-4 text-amber-400" />}
+            <span>{isZelephMember(currentUser) ? 'Proposer une montée' : 'Connexion requise pour proposer'}</span>
+          </button>
+        </div>
 
         {/* Ambient subtle glow */}
         <div className="absolute right-0 top-0 w-64 h-64 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -392,18 +620,57 @@ export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({
                   {ride.passengers.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       {ride.passengers.map((p, i) => (
-                        <span key={i} className="bg-white/5 text-slate-200 text-[11px] px-2.5 py-0.5 rounded-lg border border-white/5 font-medium">
-                          {p}
+                        <span 
+                          key={i} 
+                          className="bg-white/5 text-slate-200 text-[11px] px-2.5 py-1 rounded-lg border border-white/5 font-medium flex items-center gap-1.5 hover:bg-white/10 transition"
+                        >
+                          <span>{p}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleLeaveRide(ride, p);
+                            }}
+                            className="text-slate-500 hover:text-rose-400 transition"
+                            title={`Désinscrire ${p} et libérer la place`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
                         </span>
                       ))}
                     </div>
                   )}
                 </div>
+
+                {/* Discord Sync Indicator & Action */}
+                <div className="flex items-center justify-between text-[11px] pt-3 mt-3 border-t border-white/5">
+                  <div className="flex items-center gap-1.5">
+                    {ride.discordMessageId ? (
+                      <span className="flex items-center gap-1.5 text-emerald-400 font-medium text-[11px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Synchronisé Discord
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 text-[11px]">Non synchronisé</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleManualSync(ride)}
+                    disabled={syncingRideId === ride.id}
+                    className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition flex items-center gap-1.5 text-[10px] font-mono"
+                    title="Mettre à jour le message Discord existant sans doublon"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingRideId === ride.id ? 'animate-spin text-sky-400' : ''}`} />
+                    <span>{ride.discordMessageId ? 'Sync Discord' : 'Publier'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="mt-5 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
+              <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
                 <button
+                  type="button"
                   onClick={() => handleDeleteRide(ride)}
                   className="p-2.5 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
                   title="Supprimer la navette"
@@ -412,7 +679,8 @@ export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({
                 </button>
 
                 <button
-                  onClick={() => handleJoinRide(ride.id)}
+                  type="button"
+                  onClick={() => handleOpenJoinModal(ride)}
                   disabled={isFull}
                   className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                     isFull
@@ -636,6 +904,102 @@ export const ShuttleBoard: React.FC<ShuttleBoardProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* In-app Join Shuttle Modal with prefilled name and live Discord PATCH sync */}
+      {joinModalRide && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-white/15 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 text-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
+                  <Car className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Réserver une place en navette</h3>
+                  <p className="text-xs text-sky-400 font-semibold">{joinModalRide.destinationSiteName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setJoinModalRide(null);
+                  if (onClearHighlightedRide) onClearHighlightedRide();
+                }}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950/70 p-4 rounded-2xl border border-white/5 space-y-2 text-xs">
+              <div className="flex justify-between text-slate-300">
+                <span>Conducteur :</span>
+                <span className="font-bold text-white">{joinModalRide.driverName}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span>Heure de départ :</span>
+                <span className="font-mono font-bold text-sky-300">{joinModalRide.departureTime}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span>Lieu de rendez-vous :</span>
+                <span className="text-slate-200">{joinModalRide.departurePlace}</span>
+              </div>
+              <div className="flex justify-between text-slate-300 pt-2 border-t border-white/5 font-semibold">
+                <span>Places restantes :</span>
+                <span className="font-mono text-emerald-400 font-bold">
+                  {joinModalRide.availableSeats} / {joinModalRide.totalSeats} places disponibles
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-2">
+                Votre nom, prénom ou pseudo Discord :
+              </label>
+              <input
+                type="text"
+                value={joinPilotName}
+                onChange={(e) => setJoinPilotName(e.target.value)}
+                placeholder="Ex: Jonathan R. ou votre pseudo Discord"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-sm focus:outline-none focus:border-sky-500 transition"
+                autoFocus
+              />
+              <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                ⚡ <strong>Synchronisation en direct :</strong> dès validation, le message Discord de cette navette sera automatiquement actualisé avec votre nom et le décompte des places restantes, <em>sans créer de doublon</em>.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setJoinModalRide(null);
+                  if (onClearHighlightedRide) onClearHighlightedRide();
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold transition"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmJoin}
+                disabled={!joinPilotName.trim() || joinModalRide.availableSeats <= 0}
+                className="flex-1 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold shadow-lg shadow-sky-500/20 disabled:opacity-50 transition"
+              >
+                Valider ma place (+1)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating feedback toast */}
+      {toastMsg && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl bg-slate-900/95 border border-sky-500/40 text-sky-200 text-xs shadow-2xl backdrop-blur-md flex items-center gap-2 animate-bounce-short">
+          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span className="font-medium">{toastMsg}</span>
         </div>
       )}
     </div>

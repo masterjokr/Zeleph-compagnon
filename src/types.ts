@@ -73,6 +73,10 @@ export interface ShuttleRide {
   passengers: string[];
   comment?: string;
   createdAt: string;
+  discordMessageId?: string;
+  discordChannelId?: string;
+  discordWebhookUrl?: string;
+  discordLastSyncedAt?: string;
 }
 
 export interface HikeAndFlyTopo {
@@ -229,4 +233,8 @@ export interface ClubOuting {
   statusNote?: string;
   description: string;
   createdAt: string;
+  discordMessageId?: string;
+  discordChannelId?: string;
+  discordWebhookUrl?: string;
+  discordLastSyncedAt?: string;
 }
